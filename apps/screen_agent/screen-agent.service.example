@@ -1,0 +1,14 @@
+[Unit]
+Description=Focused-window screen agent
+Documentation=file:%h/workspace/golang2/apps/screen_agent/README.md
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/screen-agent daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

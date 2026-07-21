@@ -1,0 +1,33 @@
+# Binary
+agent
+
+# Environment files with secrets
+.env
+.env.local
+.env.*.local
+
+# Keep the example
+!.env.example
+
+# Runtime memory files
+memory.md
+memory_archive.md
+
+# Agent identity
+soul.md
+
+# Saved skills
+skills.json
+
+# Custom system prompt (keep the example)
+system_prompt.md
+!system_prompt.example.md
+
+# SQLite databases
+*.db
+
+# Session logs
+logs/
+
+# Temporary/generated files
+keygen_slip10.go

@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoWild Agent Manager</title>
+    <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+    <div class="header">
+        <h1>GoWild Agent Manager</h1>
+        <span class="header-clock" id="header-clock"></span>
+        <div class="header-actions">
+            <div class="agent-picker">
+                <button class="btn btn-primary" id="add-agent-btn" onclick="toggleAgentPicker()">+ Add Column</button>
+                <div class="agent-picker-dropdown" id="agent-picker-dropdown">
+                    <div class="agent-picker-search">
+                        <input type="text" id="agent-search" placeholder="Search agents or builtins..." oninput="filterAgentPicker()">
+                    </div>
+                    <div class="agent-picker-list" id="agent-picker-list"></div>
+                </div>
+            </div>
+            <button class="btn btn-sm btn-primary" onclick="createNewAgent()">New Agent</button>
+            <button class="btn btn-sm" onclick="showPeerGroups()">Peer Groups</button>
+            <button class="btn btn-sm" onclick="showCompanies()">Companies</button>
+            <button class="btn btn-sm" onclick="showPolymarketPortfolio()">Polymarket</button>
+            <button class="btn btn-sm" onclick="showMissions()">Missions</button>
+            <button class="btn btn-sm" onclick="showPipelines()">Pipelines</button>
+            <button class="btn btn-sm" onclick="showMCPServers()">MCP Servers</button>
+            <button class="btn btn-sm" onclick="checkDocker()">Docker Status</button>
+            <button class="btn btn-sm" onclick="buildImage()">Build Image</button>
+        </div>
+    </div>
+
+    <div class="columns-container" id="columns-container">
+        <div class="empty-state" id="empty-state">
+            <div class="empty-state-content">
+                <h2>No Columns Displayed</h2>
+                <p>Click "Add Column" to display agents or builtin method output</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Peer Groups Modal -->
+    <div class="modal-overlay" id="peer-groups-modal" style="display:none">
+        <div class="modal-content" style="max-width:600px;max-height:80vh;overflow:auto">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <h2 style="margin:0">Peer Groups</h2>
+                <button class="btn btn-sm" onclick="closePeerGroups()">&times;</button>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:16px">
+                <input type="text" id="new-group-name" placeholder="Group name..." style="flex:1">
+                <button class="btn btn-sm btn-primary" onclick="createPeerGroup()">Create Group</button>
+            </div>
+            <div id="peer-groups-list"></div>
+        </div>
+    </div>
+
+    <!-- Companies Modal -->
+    <div class="modal-overlay" id="companies-modal" style="display:none">
+        <div class="modal-content" style="max-width:900px;max-height:80vh;overflow:auto">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <h2 style="margin:0">Companies</h2>
+                <button class="btn btn-sm" onclick="closeCompanies()">&times;</button>
+            </div>
+
+            <div class="peer-group-card" style="margin-bottom:16px">
+                <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;margin-bottom:10px">Create Company</div>
+                <div class="form-row">
+                    <div class="form-group" style="flex:2">
+                        <label for="company-create-name">Name</label>
+                        <input type="text" id="company-create-name" placeholder="Acme Trading">
+                    </div>
+                    <div class="form-group">
+                        <label for="company-create-ceo">CEO (optional)</label>
+                        <select id="company-create-ceo"></select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="company-create-description">Description</label>
+                    <input type="text" id="company-create-description" placeholder="What this company does">
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:8px">
+                    <button class="btn btn-sm btn-primary" onclick="createCompany()">Create Company</button>
+                </div>
+            </div>
+
+            <div id="companies-list"></div>
+        </div>
+    </div>
+
+    <!-- Polymarket Portfolio Modal -->
+    <div class="modal-overlay" id="polymarket-portfolio-modal" style="display:none">
+        <div class="modal-content" style="max-width:1200px;max-height:85vh;overflow:auto">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+                <h2 style="margin:0">Polymarket Portfolio</h2>
+                <button class="btn btn-sm" onclick="closePolymarketPortfolio()">&times;</button>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+                <select id="polymarket-portfolio-company-select" style="min-width:260px;flex:1;max-width:420px" onchange="onPolymarketPortfolioCompanyChange()">
+                    <option value="">Select a company...</option>
+                </select>
+                <button class="btn btn-sm" onclick="loadPolymarketPortfolio()">Refresh</button>
+            </div>
+            <div id="polymarket-portfolio-status" style="font-size:12px;color:var(--text-muted);min-height:18px;margin-bottom:8px"></div>
+            <div id="polymarket-portfolio-content">
+                <div style="color:var(--text-muted);padding:16px 0">Select a company to load positions and open orders.</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="polymarket-notes-modal" style="display:none">
+        <div class="modal-content" style="max-width:760px;max-height:85vh;overflow:auto">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+                <div>
+                    <h2 id="polymarket-notes-title" style="margin:0">Market Notes</h2>
+                    <div id="polymarket-notes-subtitle" style="font-size:12px;color:var(--text-muted);margin-top:4px"></div>
+                </div>
+                <button class="btn btn-sm" onclick="closePolymarketNotes()">&times;</button>
+            </div>
+            <div id="polymarket-notes-status" style="font-size:12px;color:var(--text-muted);min-height:18px;margin-bottom:8px"></div>
+            <div id="polymarket-notes-list" style="display:flex;flex-direction:column;gap:10px;max-height:65vh;overflow:auto">
+                <div style="color:var(--text-muted);padding:12px 0">Select a market note count to read notes.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MCP Servers Modal -->
+    <div class="modal-overlay" id="mcp-servers-modal" style="display:none">
+        <div class="modal-content" style="max-width:900px;max-height:80vh;overflow:auto">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <h2 style="margin:0">MCP Servers</h2>
+                <button class="btn btn-sm" onclick="closeMCPServers()">&times;</button>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+                <div>
+                    <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">Registry (Host-Side)</div>
+                    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+                        <input type="text" id="mcp-server-id" placeholder="id (e.g. google-calendar)">
+                        <input type="text" id="mcp-server-name" placeholder="name">
+                        <input type="text" id="mcp-server-desc" placeholder="description">
+                        <input type="text" id="mcp-server-command" placeholder="command (e.g. node)">
+                        <textarea id="mcp-server-args" rows="2" placeholder='args JSON (e.g. ["path/to/server.js"])'></textarea>
+                        <input type="text" id="mcp-server-working-dir" placeholder="working dir (optional)">
+                        <textarea id="mcp-server-env" rows="3" placeholder='default env JSON (optional)'></textarea>
+                        <div style="display:flex;gap:8px">
+                            <button class="btn btn-sm btn-primary" onclick="saveMCPServer()">Save Server</button>
+                            <button class="btn btn-sm" onclick="clearMCPServerForm()">Clear</button>
+                        </div>
+                    </div>
+                    <div id="mcp-servers-list"></div>
+                </div>
+
+                <div>
+                    <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">Per-Agent Config</div>
+                    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+                        <select id="mcp-agent-select" onchange="handleMCPAgentChange()"></select>
+                        <select id="mcp-server-select" onchange="handleMCPServerSelect()"></select>
+                        <label style="display:flex;align-items:center;gap:8px;font-size:12px">
+                            <input type="checkbox" id="mcp-agent-enabled">
+                            Enabled
+                        </label>
+                        <textarea id="mcp-agent-args" rows="2" placeholder='args JSON override (optional)'></textarea>
+                        <input type="text" id="mcp-agent-working-dir" placeholder="working dir override (optional)">
+                        <textarea id="mcp-agent-env" rows="3" placeholder='env JSON override (secrets here)'></textarea>
+                        <div style="display:flex;gap:8px">
+                            <button class="btn btn-sm btn-primary" onclick="saveAgentMCPConfig()">Save Config</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteAgentMCPConfig()">Remove Config</button>
+                            <button class="btn btn-sm" onclick="testAgentMCPConfig()">Test Connection</button>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted)">Per-agent env values are stored on the manager host and are not shared with agents.</div>
+                    </div>
+                    <div id="mcp-agent-configs-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Missions Modal -->
+    <div class="modal-overlay" id="missions-modal" style="display:none">
+        <div class="modal-content missions-modal-content">
+            <div class="missions-modal-header">
+                <h2 style="margin:0">Missions</h2>
+                <button class="btn btn-sm" onclick="closeMissions()">&times;</button>
+            </div>
+            <div class="missions-company-selector">
+                <select id="missions-company-select" class="missions-select" onchange="onMissionsCompanyChange()">
+                    <option value="">Select a company...</option>
+                </select>
+                <button class="btn btn-sm btn-primary" id="missions-new-btn" onclick="toggleMissionForm()" style="display:none">+ New Mission</button>
+                <button class="btn btn-sm" onclick="refreshMissionsData()" style="margin-left:auto">Refresh</button>
+            </div>
+            <div id="missions-new-form" style="display:none;padding:10px 16px;border-bottom:1px solid var(--border)">
+                <input id="missions-new-title" type="text" placeholder="Mission title..." style="width:100%;margin-bottom:6px">
+                <textarea id="missions-new-desc" placeholder="Description (optional)..." rows="2" style="width:100%;margin-bottom:6px;resize:vertical"></textarea>
+                <div style="display:flex;gap:8px;justify-content:flex-end">
+                    <button class="btn btn-sm btn-primary" onclick="submitNewMission()">Create</button>
+                    <button class="btn btn-sm" onclick="toggleMissionForm()">Cancel</button>
+                </div>
+            </div>
+            <div class="missions-layout">
+                <div class="missions-tree-panel">
+                    <div class="missions-panel-header">Tree <span id="missions-obj-count" class="missions-count">0</span></div>
+                    <div class="missions-panel-body" id="missions-tree-container">
+                        <div class="missions-empty">Select a company</div>
+                    </div>
+                </div>
+                <div class="missions-detail-panel">
+                    <div class="missions-panel-header">
+                        <span id="missions-detail-title">Detail</span>
+                    </div>
+                    <div class="missions-detail-actions" id="missions-detail-actions" style="display:none">
+                        <button class="btn btn-sm" style="background:var(--green);color:#fff" onclick="resumeSelectedMission()">Resume</button>
+                        <button class="btn btn-sm" onclick="pauseSelectedMission()">Pause</button>
+                        <button class="btn btn-sm" style="color:var(--red)" onclick="deleteSelectedMission()">Delete</button>
+                    </div>
+                    <div class="missions-tabs">
+                        <button class="missions-tab active" data-missions-tab="activity" onclick="switchMissionsTab('activity')">Activity</button>
+                        <button class="missions-tab" data-missions-tab="graphs" onclick="switchMissionsTab('graphs')">Graphs</button>
+                    </div>
+                    <div class="missions-panel-body missions-tab-content active" id="missions-tab-activity">
+                        <div class="missions-empty">Select a mission</div>
+                    </div>
+                    <div class="missions-panel-body missions-tab-content" id="missions-tab-graphs">
+                        <div class="missions-empty">Select a mission to see graphs</div>
+                    </div>
+                    <div class="missions-chat-bar" id="missions-chat-bar" style="display:none">
+                        <input id="missions-chat-input" type="text" placeholder="Send guidance to this mission..." onkeydown="if(event.key==='Enter')sendMissionMessage()">
+                        <button class="btn btn-sm btn-primary" onclick="sendMissionMessage()">Send</button>
+                    </div>
+                </div>
+                <div class="missions-escalation-panel">
+                    <div class="missions-panel-header">Escalations <span id="missions-esc-count" class="missions-count">0</span></div>
+                    <div class="missions-panel-body" id="missions-escalation-container">
+                        <div class="missions-empty">No escalations</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pipelines Modal -->
+    <div class="modal-overlay" id="pipelines-modal" style="display:none">
+        <div class="modal-content pipelines-modal-content">
+            <div class="pipelines-modal-header">
+                <h2 style="margin:0">Pipelines</h2>
+                <button class="btn btn-sm" onclick="closePipelines()">&times;</button>
+            </div>
+            <div class="pipelines-modal-tabs">
+                <button class="pipelines-modal-tab active" data-pipeline-modal-tab="runs" onclick="switchPipelinesModalTab('runs')">Pipelines</button>
+                <button class="pipelines-modal-tab" data-pipeline-modal-tab="editor" onclick="switchPipelinesModalTab('editor')">Editor</button>
+                <button class="pipelines-modal-tab" data-pipeline-modal-tab="methods" onclick="switchPipelinesModalTab('methods')">Methods</button>
+                <button class="pipelines-modal-tab" data-pipeline-modal-tab="deep-research" onclick="switchPipelinesModalTab('deep-research')">Deep Research</button>
+                <button class="pipelines-modal-tab" data-pipeline-modal-tab="initial" onclick="switchPipelinesModalTab('initial')">Try Request</button>
+            </div>
+
+            <div class="pipelines-modal-panels">
+                <div class="pipelines-modal-panel" data-pipeline-modal-panel="initial">
+                    <div class="pipelines-section">
+                        <div class="pipelines-section-header">
+                            <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase">Try Request</div>
+                            <button class="btn btn-sm" onclick="loadPipelinesModalData()">Refresh</button>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Target Capability</label>
+                            <select id="pipeline-target-capability" onchange="handlePipelineCapabilityChange()"></select>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Role</label>
+                                <input type="text" id="pipeline-target-role" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label>Method</label>
+                                <input type="text" id="pipeline-target-method" readonly>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Params (JSON)</label>
+                            <textarea id="pipeline-initial-params" rows="8" placeholder='{"foo":"bar"}'></textarea>
+                        </div>
+
+                        <div style="display:flex;gap:8px;align-items:center">
+                            <button class="btn btn-sm btn-primary" onclick="submitPipelineInitialRequest()">Send Request</button>
+                        </div>
+
+                        <div id="pipeline-initial-result" class="pipelines-result" style="display:none"></div>
+                    </div>
+                </div>
+
+                <div class="pipelines-modal-panel" data-pipeline-modal-panel="editor">
+                    <div class="pipelines-section">
+                        <div class="pipelines-section-header">
+                            <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase">Editor</div>
+                            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                                <button class="btn btn-sm" onclick="pipelineEditorNew()">New</button>
+                                <button class="btn btn-sm btn-primary" id="pipeline-editor-save-btn" onclick="pipelineEditorSave()">Save</button>
+                                <button class="btn btn-sm" onclick="pipelineEditorDuplicate()">Duplicate</button>
+                                <button class="btn btn-sm btn-danger" id="pipeline-editor-delete-btn" onclick="pipelineEditorDelete()">Delete</button>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Pipeline ID</label>
+                            <input type="text" id="pipeline-editor-id" placeholder="my_pipeline_001" oninput="pipelineEditorUpdateMeta()">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Pipeline Name</label>
+                            <input type="text" id="pipeline-editor-name" placeholder="My Pipeline" oninput="pipelineEditorUpdateMeta()">
+                        </div>
+
+                        <div style="margin-top:6px;display:flex;align-items:center;gap:16px">
+                            <label style="font-size:12px;color:var(--text-muted)">
+                                <input type="checkbox" id="pipeline-editor-enabled" onchange="pipelineEditorUpdateMeta()" checked>Enabled
+                            </label>
+                            <div class="form-group" style="margin:0;flex:1;max-width:200px">
+                                <label style="font-size:11px;color:var(--text-muted)">Schedule</label>
+                                <input type="text" id="pipeline-editor-schedule" placeholder="e.g. 4h, 30m, 24h" oninput="pipelineEditorUpdateMeta()" style="font-size:12px;padding:3px 6px">
+                            </div>
+                        </div>
+
+                        <div class="form-row" style="margin-top:10px">
+                            <div class="form-group">
+                                <label>Scope</label>
+                                <select id="pipeline-editor-scope-mode" onchange="pipelineEditorUpdateScope()">
+                                    <option value="global">Global</option>
+                                    <option value="company">Company</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Scope Company</label>
+                                <select id="pipeline-editor-scope-company" onchange="pipelineEditorUpdateScope()" disabled>
+                                    <option value="">Select company...</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="pipelines-divider"></div>
+
+                        <div class="form-group">
+                            <label>Trigger Method</label>
+                            <input type="text" id="pipeline-editor-trigger-method" list="pipeline-methods-datalist" placeholder="method_name" oninput="pipelineEditorUpdateTrigger()">
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Trigger Status</label>
+                                <select id="pipeline-editor-trigger-status" onchange="pipelineEditorUpdateTrigger()">
+                                    <option value="succeeded">succeeded</option>
+                                    <option value="failed">failed</option>
+                                    <option value="*">*</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>From Role</label>
+                                <input type="text" id="pipeline-editor-trigger-from-role" list="pipeline-roles-datalist" placeholder="*" oninput="pipelineEditorUpdateTrigger()">
+                            </div>
+                        </div>
+
+                        <div class="pipelines-divider"></div>
+
+                        <div class="pipelines-section-header">
+                            <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase">Actions</div>
+                            <button class="btn btn-sm" onclick="pipelineEditorAddAction()">+ Add Action</button>
+                        </div>
+
+                        <div id="pipeline-editor-actions"></div>
+
+                        <datalist id="pipeline-methods-datalist"></datalist>
+                        <datalist id="pipeline-roles-datalist"></datalist>
+
+                        <div id="pipeline-editor-validation" class="pipelines-result error" style="display:none"></div>
+                        <div id="pipeline-editor-result" class="pipelines-result" style="display:none"></div>
+                    </div>
+                </div>
+
+                <div class="pipelines-modal-panel active" data-pipeline-modal-panel="runs">
+                    <div class="pipelines-section">
+                        <div class="pipelines-section-header">
+                            <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase">Pipelines</div>
+                            <button class="btn btn-sm" onclick="loadPipelinesModalData()">Refresh</button>
+                        </div>
+                        <div id="pipelines-list"></div>
+
+                        <div class="pipelines-section-header" style="margin-top:16px">
+                            <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase">Active Jobs</div>
+                            <button class="btn btn-sm btn-danger" id="pipeline-delete-all-jobs-btn" onclick="deleteAllPipelineJobs()" disabled>Delete All Jobs</button>
+                        </div>
+                        <div id="pipeline-active-jobs"></div>
+
+                        <div class="pipelines-section-header" style="margin-top:16px">
+                            <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase">Recent Runs</div>
+                        </div>
+                        <div id="pipeline-runs-list"></div>
+                    </div>
+                </div>
+
+                <div class="pipelines-modal-panel" data-pipeline-modal-panel="methods">
+                    <div class="pipelines-section">
+                        <div class="methods-layout">
+                            <div>
+                                <div id="a2a-method-form-title" style="font-size:12px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">Create Method</div>
+                                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+                                    <input type="text" id="a2a-method-form-method" placeholder="method (e.g. fulfill_order)">
+                                    <textarea id="a2a-method-form-desc" rows="3" placeholder="description (optional)"></textarea>
+                                    <label style="font-size:12px;color:var(--text-muted);margin-top:2px">Method Instructions (optional)</label>
+                                    <textarea id="a2a-method-form-instructions" rows="4" placeholder="Instructions for the implementing agent when this method is called"></textarea>
+                                    <label style="font-size:12px;color:var(--text-muted);margin-top:2px">Model Tier</label>
+                                    <select id="a2a-method-form-model-tier" style="font-size:12px;padding:4px 8px">
+                                        <option value="">smart (default)</option>
+                                        <option value="fast">fast</option>
+                                    </select>
+                                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
+                                        <input type="checkbox" id="a2a-method-form-auto-market-note">
+                                        <span>Write a market note after completion, even on failure</span>
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
+                                        <input type="checkbox" id="a2a-method-form-fresh-context">
+                                        <span>Start every method call with a fresh empty context</span>
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
+                                        <input type="checkbox" id="a2a-method-form-redact-market-prices">
+                                        <span>Redact live market prices from pipeline input before delivery</span>
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
+                                        <input type="checkbox" id="a2a-method-form-disable-market-notes">
+                                        <span>Disable direct market-note access during method execution</span>
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
+                                        <input type="checkbox" id="a2a-method-form-disable-polymarket-note-augmentation">
+                                        <span>Disable Polymarket note augmentation on fetched market data</span>
+                                    </label>
+                                    <label style="font-size:12px;color:var(--text-muted);margin-top:6px">Completion Timestamp Key (optional)</label>
+                                    <input type="text" id="a2a-method-form-completion-timestamp-key" placeholder="e.g. last_researched_at">
+                                    <label style="font-size:12px;color:var(--text-muted);margin-top:2px">Completion Success Key (optional)</label>
+                                    <input type="text" id="a2a-method-form-completion-success-key" placeholder="e.g. research_succeeded">
+                                    <label style="font-size:12px;color:var(--text-muted);margin-top:2px">Input Schema (optional)</label>
+                                    <textarea id="a2a-method-form-input-schema" rows="6" placeholder='input schema JSON'></textarea>
+                                    <label style="font-size:12px;color:var(--text-muted);margin-top:2px">Output Schema (optional)</label>
+                                    <textarea id="a2a-method-form-output-schema" rows="6" placeholder='output schema JSON'></textarea>
+
+                                    <div class="schema-helper-card">
+                                        <div class="schema-helper-title">Schema Helper</div>
+
+                                        <div class="schema-helper-block">
+                                            <div class="schema-helper-label">Input</div>
+                                            <textarea id="a2a-method-form-input-example" rows="4" placeholder='Example input JSON, e.g. {"order_id":"A123","priority":true}'></textarea>
+                                            <div class="schema-helper-actions">
+                                                <button class="btn btn-sm" type="button" onclick="generateSchemaFromMethodExample('input')">Generate from example</button>
+                                                <button class="btn btn-sm" type="button" onclick="applyMethodSchemaTemplate('input', 'object_loose')">Object template</button>
+                                                <button class="btn btn-sm" type="button" onclick="applyMethodSchemaTemplate('input', 'object_strict')">Strict template</button>
+                                            </div>
+                                        </div>
+
+                                        <div class="schema-helper-block">
+                                            <div class="schema-helper-label">Output</div>
+                                            <textarea id="a2a-method-form-output-example" rows="4" placeholder='Example output JSON, e.g. {"status":"ok","message":"done"}'></textarea>
+                                            <div class="schema-helper-actions">
+                                                <button class="btn btn-sm" type="button" onclick="generateSchemaFromMethodExample('output')">Generate from example</button>
+                                                <button class="btn btn-sm" type="button" onclick="applyMethodSchemaTemplate('output', 'status_response')">Status template</button>
+                                                <button class="btn btn-sm" type="button" onclick="applyMethodSchemaTemplate('output', 'object_strict')">Strict template</button>
+                                            </div>
+                                        </div>
+
+                                        <details class="schema-helper-cheatsheet">
+                                            <summary>Schema tips</summary>
+                                            <div class="schema-helper-cheatsheet-body">
+                                                <div><code>type</code>: object, array, string, integer, number, boolean, null</div>
+                                                <div><code>required</code>: list of required property names</div>
+                                                <div><code>properties</code>: object field definitions</div>
+                                                <div><code>additionalProperties: false</code>: reject unknown keys</div>
+                                                <div><code>enum</code>: fixed set of values, e.g. <code>["pending","done"]</code></div>
+                                            </div>
+                                        </details>
+                                    </div>
+
+                                <div style="display:flex;gap:8px;justify-content:flex-end">
+                                    <button class="btn btn-sm btn-primary" id="a2a-method-form-save" onclick="saveA2AMethod()">Create</button>
+                                    <button class="btn btn-sm" onclick="clearA2AMethodForm()">New</button>
+                                </div>
+                            </div>
+                            </div>
+
+                            <div>
+                                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                                    <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase">Methods</div>
+                                    <button class="btn btn-sm" onclick="loadA2AMethods().then(() => { renderA2AMethodsList(); renderPipelineEditorDatalists(); })">Refresh</button>
+                                </div>
+                                <div id="a2a-methods-list"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pipelines-modal-panel" data-pipeline-modal-panel="deep-research">
+                    <div class="pipelines-section">
+                        <div class="methods-layout">
+                            <div>
+                                <div id="deep-research-form-title" style="font-size:12px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">Create Deep Research Method</div>
+                                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+                                    <input type="text" id="deep-research-form-method" placeholder="method (e.g. deep_research_market_landscape)">
+                                    <textarea id="deep-research-form-desc" rows="3" placeholder="description (agent-facing, optional)"></textarea>
+                                    <label style="font-size:12px;color:var(--text-muted);margin-top:2px">Instructions (optional — guides the research engine)</label>
+                                    <textarea id="deep-research-form-instructions" rows="4" placeholder="detailed research directives for the engine (falls back to description if empty)"></textarea>
+                                    <label style="font-size:12px;color:var(--text-muted);margin-top:2px">Input Schema (optional)</label>
+                                    <textarea id="deep-research-form-input-schema" rows="6" placeholder='input schema JSON'></textarea>
+                                    <label style="font-size:12px;color:var(--text-muted);margin-top:2px">Research Schema (optional)</label>
+                                    <textarea id="deep-research-form-research-schema" rows="6" placeholder='research schema JSON'></textarea>
+                                    <label style="font-size:12px;color:var(--text-muted);margin-top:2px">Engine Options (optional)</label>
+                                    <textarea id="deep-research-form-options" rows="4" placeholder='{"max_depth":2,"search_results_per_query":5}'></textarea>
+                                    <label style="font-size:12px;color:var(--text-muted);margin-top:2px">Test Input JSON</label>
+                                    <textarea id="deep-research-form-test-input" rows="4" placeholder='{"topic":"AI agents","region":"US"}'></textarea>
+                                    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)">
+                                        <input type="checkbox" id="deep-research-form-enabled" checked>
+                                        Enabled
+                                    </label>
+                                    <div style="display:flex;gap:8px;justify-content:flex-end">
+                                        <button class="btn btn-sm" id="deep-research-form-test" onclick="testDeepResearchMethodFromForm()">Test</button>
+                                        <button class="btn btn-sm btn-primary" id="deep-research-form-save" onclick="saveDeepResearchMethod()">Create</button>
+                                        <button class="btn btn-sm" onclick="clearDeepResearchMethodForm()">New</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                                    <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase">Deep Research Methods</div>
+                                    <button class="btn btn-sm" onclick="loadDeepResearchMethods().then(renderDeepResearchMethodsList)">Refresh</button>
+                                </div>
+                                <div class="help" style="margin-bottom:8px">Use Test to run a method immediately with JSON input.</div>
+                                <div id="deep-research-methods-list"></div>
+                            </div>
+                        </div>
+                        <div id="deep-research-test-result" class="pipelines-result" style="display:none;margin-top:12px"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="pipeline-step-io-modal" style="display:none" onclick="if(event.target===this) closePipelineStepIOModal()">
+        <div class="modal-content pipeline-step-io-modal-content">
+            <div class="pipeline-step-io-modal-header">
+                <h2 id="pipeline-step-io-modal-title" style="margin:0">Pipeline Step IO</h2>
+                <button class="btn btn-sm" onclick="closePipelineStepIOModal()">&times;</button>
+            </div>
+            <pre id="pipeline-step-io-modal-body" class="pipeline-step-io-modal-pre"></pre>
+        </div>
+    </div>
+
+    <!-- Agent Column Template -->
+    <template id="agent-column-template">
+        <div class="agent-column" data-agent-id="">
+            <div class="column-header">
+                <div class="column-header-info">
+                    <h2 class="column-agent-name"></h2>
+                    <span class="badge column-badge"></span>
+                    <span class="badge column-stale-badge" style="display:none">stale</span>
+                </div>
+                <div class="column-header-actions">
+                    <label class="autoplay-toggle" title="Autoplay audio OFF">
+                        <input type="checkbox" class="autoplay-toggle-input" onchange="toggleAutoplayInColumn(this)">
+                        <span class="autoplay-toggle-slider"></span>
+                        <span class="autoplay-toggle-label">Autoplay</span>
+                    </label>
+                    <label class="smart-toggle" title="Toggle smart mode">
+                        <input type="checkbox" class="smart-toggle-input" onchange="toggleSmartModeInColumn(this)">
+                        <span class="smart-toggle-slider"></span>
+                        <span class="smart-toggle-label">Smart</span>
+                    </label>
+                    <button class="btn btn-sm btn-warning btn-refresh-image" onclick="refreshImageInColumn(this)" style="display:none" title="Rebuild image and refresh">Update</button>
+                    <button class="btn btn-sm btn-primary btn-start" onclick="startAgentInColumn(this)">Start</button>
+                    <button class="btn btn-sm btn-danger btn-stop" onclick="stopAgentInColumn(this)" style="display:none">Stop</button>
+                    <button class="btn btn-sm btn-restart" onclick="restartAgentInColumn(this)">Restart</button>
+                    <button class="btn btn-sm btn-clear-context" onclick="clearContextInColumn(this)" title="Clear conversation history">Clear</button>
+                    <button class="btn btn-sm btn-work-tasks" onclick="workTasksInColumn(this)" title="Work through pending tasks">Work</button>
+                    <button class="btn btn-sm btn-clone" onclick="cloneAgentInColumn(this)" title="Clone agent">Clone</button>
+                    <button class="btn btn-sm btn-close" onclick="removeColumn(this)" title="Close">&times;</button>
+                </div>
+            </div>
+
+            <div class="tabs">
+                <div class="tab active" data-tab="terminal" onclick="switchColumnTab(this, 'terminal')">Terminal</div>
+                <div class="tab" data-tab="state" onclick="switchColumnTab(this, 'state')">State</div>
+                <div class="tab" data-tab="context" onclick="switchColumnTab(this, 'context')">Context</div>
+                <div class="tab" data-tab="report" onclick="switchColumnTab(this, 'report')">Report</div>
+                <div class="tab" data-tab="knowledge" onclick="switchColumnTab(this, 'knowledge')">Knowledge</div>
+                <div class="tab" data-tab="logs" onclick="switchColumnTab(this, 'logs')">Logs</div>
+                <div class="tab" data-tab="prompt" onclick="switchColumnTab(this, 'prompt')">Prompt</div>
+                <div class="tab" data-tab="config" onclick="switchColumnTab(this, 'config')">Config</div>
+            </div>
+
+            <div class="tab-content">
+                <div class="tab-panel active" data-panel="terminal">
+                    <div class="chat-wrapper">
+                        <div class="chat-messages"></div>
+                        <div class="file-indicator" style="display:none">
+                            <span class="file-indicator-name"></span>
+                            <button class="file-indicator-remove" onclick="removeAttachedFile(this)">&times;</button>
+                        </div>
+                        <div class="email-notification" style="display:none">
+                            <span class="email-notification-text"></span>
+                            <button class="btn btn-sm btn-warning email-notification-btn" onclick="showEmailApproval(this)">Review</button>
+                        </div>
+                        <div class="chat-input-bar" style="display:none">
+                            <input type="file" class="file-input-hidden" style="display:none" onchange="handleFileSelectedInColumn(this)">
+                            <button class="btn btn-attach" onclick="attachFileInColumn(this)" title="Attach file">&#128206;</button>
+                            <textarea class="chat-input" placeholder="Type a message..." rows="1"></textarea>
+                            <button class="btn btn-primary btn-send" onclick="sendMessageInColumn(this)">Send</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-panel" data-panel="state">
+                    <div class="state-panel">
+                        <div class="state-toolbar">
+                            <button class="btn btn-sm" onclick="refreshStateInColumn(this)">Refresh</button>
+                        </div>
+
+                        <div class="state-section">
+                            <div class="state-section-header" onclick="toggleSectionInColumn(this, 'tasks')">
+                                <span class="section-toggle">▼</span>
+                                <span class="section-title">Tasks</span>
+                                <span class="section-meta tasks-count"></span>
+                            </div>
+                            <div class="state-section-content content-tasks">
+                                <div class="task-list"></div>
+                            </div>
+                        </div>
+
+                        <div class="state-section">
+                            <div class="state-section-header" onclick="toggleSectionInColumn(this, 'soul')">
+                                <span class="section-toggle">▼</span>
+                                <span class="section-title">Soul</span>
+                                <span class="section-meta soul-updated"></span>
+                            </div>
+                            <div class="state-section-content content-soul">
+                                <div class="state-text state-text-long soul-text">No soul defined</div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <div class="tab-panel" data-panel="context">
+                    <div class="state-panel context-panel">
+                        <div class="context-toolbar">
+                            <button class="btn btn-sm" onclick="refreshContextInColumn(this)">Refresh</button>
+                        </div>
+
+                        <div class="state-section">
+                            <div class="state-section-header" onclick="toggleSectionInColumn(this, 'context_dump')">
+                                <span class="section-toggle">▼</span>
+                                <span class="section-title">Agent Context</span>
+                                <span class="section-meta context-dump-meta"></span>
+                            </div>
+                            <div class="state-section-content">
+                                <div class="state-text context-text-long context-dump-text">No context loaded</div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <div class="tab-panel" data-panel="report">
+                    <div class="report-panel">
+                        <div class="report-toolbar">
+                            <button class="btn btn-sm" onclick="refreshReportInColumn(this)">Refresh</button>
+                            <span class="report-updated"></span>
+                        </div>
+                        <div class="report-empty">No report available.</div>
+                        <iframe class="report-frame" title="Agent report" sandbox=""></iframe>
+                    </div>
+                </div>
+
+                <div class="tab-panel" data-panel="knowledge">
+                    <div class="knowledge-panel">
+                        <div class="kg-toolbar">
+                            <input type="text" class="kg-search" placeholder="Search nodes..." onkeyup="handleKGSearchInColumn(this, event)">
+                            <select class="kg-type-filter" onchange="loadKGNodesInColumn(this)">
+                                <option value="">All Types</option>
+                            </select>
+                            <button class="btn btn-sm" onclick="loadKGNodesInColumn(this)">Refresh</button>
+                        </div>
+                        <div class="kg-content">
+                            <div class="kg-nodes-panel">
+                                <div class="kg-panel-header">Nodes</div>
+                                <div class="kg-nodes-list"></div>
+                            </div>
+                            <div class="kg-detail-panel">
+                                <div class="kg-panel-header">Node Details</div>
+                                <div class="kg-detail-content">
+                                    <div class="kg-empty">Select a node to view details</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-panel" data-panel="logs">
+                    <div class="logs-toolbar">
+                        <button class="btn btn-sm" onclick="refreshLogsInColumn(this)">Refresh</button>
+                        <label>
+                            Tail:
+                            <input type="number" class="log-tail" value="200" style="width:80px;display:inline-block">
+                        </label>
+                    </div>
+                    <div class="logs-panel logs-content">No logs loaded.</div>
+                </div>
+
+                <div class="tab-panel" data-panel="prompt">
+                    <div class="prompt-panel">
+                        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">System Prompt Section</div>
+                        <div class="help" style="margin-bottom:12px;font-size:11px;color:var(--text-muted)">
+                            This text is injected into the agent's system prompt at the {{AGENT_CONFIGURED_SECTION}} placeholder.
+                            Use {{AgentName}} to reference the agent's name. Changes take effect on next agent restart.
+                        </div>
+                        <textarea class="cfg-system-prompt" rows="20" placeholder="Custom instructions for this agent..."></textarea>
+                        <button class="btn btn-primary" style="margin-top:12px" onclick="saveSystemPromptInColumn(this)">Save</button>
+                    </div>
+                </div>
+
+                <div class="tab-panel" data-panel="config">
+                    <div class="config-panel">
+                        <div class="agent-info">
+                            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">Agent Info</div>
+                            <div><strong>ID:</strong> <span class="info-id"></span></div>
+                            <div><strong>Name:</strong> <span class="info-name"></span></div>
+                            <div class="info-desc-row"><strong>Description:</strong> <span class="info-description"></span></div>
+                            <div class="info-integrations" style="margin-top:4px"></div>
+                        </div>
+                        <form class="config-form" onsubmit="saveConfigInColumn(this, event)">
+                            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:12px">Container Configuration</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Provider</label>
+                                    <select class="cfg-model-provider" onchange="updateProviderSpecificInputs(this.closest('.agent-column'))">
+                                        <option value="gemini">Gemini</option>
+                                        <option value="openai">OpenAI</option>
+                                        <option value="anthropic">Anthropic</option>
+                                    </select>
+                                </div>
+                                <div class="form-group cfg-openai-auth-group" style="display:none">
+                                    <label>OpenAI Auth</label>
+                                    <select class="cfg-openai-auth-mode">
+                                        <option value="api_key">API Key</option>
+                                        <option value="codex_oauth">Codex OAuth</option>
+                                    </select>
+                                    <div class="help">`codex_oauth` reads `~/.codex/auth.json` on the manager host.</div>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Model</label>
+                                    <input type="text" class="cfg-model" placeholder="gemini-3-flash-preview">
+                                </div>
+                                <div class="form-group">
+                                    <label>Smart Model</label>
+                                    <input type="text" class="cfg-smart-model" placeholder="gemini-3.1-pro-preview">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" class="cfg-smart-default">
+                                    Use smart model by default
+                                </label>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Max Turns</label>
+                                    <input type="number" class="cfg-max-turns" value="100">
+                                </div>
+                                <div class="form-group">
+                                    <label>Heartbeat</label>
+                                    <input type="text" class="cfg-heartbeat" placeholder="15m">
+                                    <div class="help">Context management interval</div>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Work Tasks Timeout</label>
+                                    <input type="text" class="cfg-worktasks-timeout" placeholder="4m">
+                                    <div class="help">Max time to keep iterating tasks after a heartbeat</div>
+                                </div>
+                            </div>
+                            <input type="hidden" class="cfg-extra-flags">
+                            <div class="form-group">
+                                <label>Environment Variables (JSON)</label>
+                                <textarea class="cfg-env-vars" rows="3" placeholder='{"KEY": "value"}'></textarea>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Memory Limit</label>
+                                    <input type="text" class="cfg-memory-limit" placeholder="2g">
+                                </div>
+                                <div class="form-group">
+                                    <label>CPU Limit</label>
+                                    <input type="text" class="cfg-cpu-limit" placeholder="2">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" class="cfg-auto-start">
+                                    Auto-start on manager boot
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label style="margin-bottom:8px;display:block">Tool Groups</label>
+                                <div class="tool-groups-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px"></div>
+                            </div>
+                            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin:16px 0 12px">Integrations</div>
+                            <div class="form-group">
+                                <label>Telegram Bot Token</label>
+                                <div style="display:flex;gap:8px;align-items:center">
+                                    <input type="password" class="cfg-telegram-token" placeholder="From @BotFather" style="flex:1">
+                                    <button type="button" class="btn btn-sm btn-clear-telegram" style="display:none" onclick="clearTelegramTokenInColumn(this)">Remove</button>
+                                </div>
+                            </div>
+                            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin:16px 0 12px">Agent Net (agent402.com)</div>
+                            <div class="agent-net-section">
+                                <div class="agent-net-pubkey" style="font-size:12px;color:var(--text-muted);word-break:break-all"></div>
+                                <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+                                    <button type="button" class="btn btn-sm btn-primary btn-grant-premium" onclick="grantPremiumInColumn(this)">Grant Premium</button>
+                                    <span class="agent-net-premium-badge" style="display:none;color:#4caf50;font-weight:bold">&#10003; Premium</span>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Save</button>
+                        </form>
+
+                        <div class="recurring-tasks-section">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Recurring Tasks</div>
+                                <button class="btn btn-sm btn-primary" onclick="showAddRecurringTaskInColumn(this)">Add Task</button>
+                            </div>
+                            <div class="recurring-tasks-list"></div>
+                        </div>
+
+                        <div class="capabilities-section">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase">A2A Capabilities</div>
+                                <button class="btn btn-sm btn-primary" onclick="showAddCapabilityInColumn(this)">Add</button>
+                            </div>
+                            <div class="capabilities-list"></div>
+                            <div class="a2a-method-tools-section">
+                                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">A2A Teammate Tools</div>
+                                <div class="help" style="margin-bottom:8px">Optional tools exposed from teammate capabilities in your company. Save via the main Config Save button above.</div>
+                                <div class="company-method-tools-grid" style="display:grid;grid-template-columns:1fr;gap:4px"></div>
+                            </div>
+                            <div class="deep-research-tools-section">
+                                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">Deep Research Tools</div>
+                                <div class="help" style="margin-bottom:8px">Optional deep research methods available to all agents. Save via the main Config Save button above.</div>
+                                <div class="deep-research-tools-grid" style="display:grid;grid-template-columns:1fr;gap:4px"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Email Approval Modal -->
+    <div class="modal-overlay" id="email-approval-modal" style="display:none">
+        <div class="modal-content" style="max-width:700px;max-height:80vh;overflow:auto">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <h2 style="margin:0">Pending Emails</h2>
+                <button class="btn btn-sm" onclick="closeEmailApproval()">&times;</button>
+            </div>
+            <div id="email-approval-list"></div>
+            <div id="email-approval-actions" style="display:none;margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+                <button class="btn btn-sm btn-primary" onclick="approveAllEmails()">Approve All</button>
+                <button class="btn btn-sm btn-danger" onclick="rejectAllEmails()">Reject All</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recurring Task Modal -->
+    <div class="modal-overlay" id="recurring-task-modal" style="display:none">
+        <div class="modal-content" style="max-width:700px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <h2 class="recurring-task-modal-title" style="margin:0">Add Recurring Task</h2>
+                <button class="btn btn-sm" onclick="closeRecurringTaskModal()">&times;</button>
+            </div>
+            <input type="hidden" class="recurring-task-modal-agent">
+            <input type="hidden" class="recurring-task-modal-id">
+            <div class="form-group">
+                <label>Description</label>
+                <textarea class="recurring-task-modal-desc" rows="6" placeholder="Check email for urgent messages"></textarea>
+                <div class="help">Supports multiple lines.</div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Interval</label>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <input type="number" class="recurring-task-modal-interval" min="1" style="width:80px">
+                        <select class="recurring-task-modal-unit">
+                            <option value="1">minutes</option>
+                            <option value="60" selected>hours</option>
+                            <option value="1440">days</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
+                <button class="btn btn-sm btn-primary" onclick="saveRecurringTaskFromModal()">Save</button>
+                <button class="btn btn-sm" onclick="closeRecurringTaskModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+    <!-- app.js must load first: globals, constants, marked fallback, init -->
+    <script src="/static/app.js"></script>
+    <!-- Utilities: escHtml, escAttr, formatDate, etc. (depended on by most other files) -->
+    <script src="/static/app_utilities.js"></script>
+    <!-- Column classes: ColumnState, AnsiToHtml, StreamParser, ColumnChatUI -->
+    <script src="/static/app_column_classes.js"></script>
+    <!-- MCP Servers UI -->
+    <script src="/static/app_mcp.js"></script>
+    <!-- A2A Methods -->
+    <script src="/static/app_a2a.js"></script>
+    <!-- Deep Research Methods -->
+    <script src="/static/app_deep_research.js"></script>
+    <!-- Pipelines UI -->
+    <script src="/static/app_pipelines.js"></script>
+    <!-- Column management, terminal, agent lifecycle, docker -->
+    <script src="/static/app_columns.js"></script>
+    <!-- Companies + Polymarket Portfolio -->
+    <script src="/static/app_companies.js"></script>
+    <!-- Peer Groups -->
+    <script src="/static/app_peer_groups.js"></script>
+    <!-- Email Approval -->
+    <script src="/static/app_email.js"></script>
+    <!-- Missions -->
+    <script src="/static/app_missions.js"></script>
+</body>
+</html>

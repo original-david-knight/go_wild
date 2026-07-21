@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROVIDER="protonvpn"
+SERVER="netherlands-nl"
+PROXY_PORT=1080
+
+echo "Starting VPN + SOCKS proxy..."
+
+# Start vopono in the background
+vopono exec \
+  --provider "$PROVIDER" \
+  --server "$SERVER" \
+  --disable-ipv6 \
+  --open-ports "$PROXY_PORT" \
+  "microsocks -i 0.0.0.0 -p $PROXY_PORT" &
+VOPONO_PID=$!
+
+# Wait for the network namespace to appear
+echo "Waiting for VPN namespace..."
+for i in $(seq 1 30); do
+  NS=$(ip netns list 2>/dev/null | awk '/vo_pr/{print $1; exit}')
+  if [[ -n "$NS" ]]; then
+    break
+  fi
+  sleep 1
+done
+
+if [[ -z "${NS:-}" ]]; then
+  echo "ERROR: VPN namespace never appeared after 30s"
+  kill "$VOPONO_PID" 2>/dev/null
+  exit 1
+fi
+
+echo "Found namespace: $NS"
+
+# Wait a beat for microsocks to bind inside the namespace
+sleep 2
+
+# Bridge the namespace SOCKS proxy to localhost
+echo "Bridging SOCKS proxy to 127.0.0.1:$PROXY_PORT"
+sudo socat \
+  "TCP-LISTEN:$PROXY_PORT,fork,reuseaddr,bind=127.0.0.1" \
+  EXEC:"ip netns exec $NS socat STDIO TCP\:127.0.0.1\:$PROXY_PORT" &
+SOCAT_PID=$!
+
+echo "Ready — SOCKS5 proxy at 127.0.0.1:$PROXY_PORT"
+echo "Press Ctrl+C to stop"
+
+# Clean up both processes on exit
+cleanup() {
+  echo ""
+  echo "Shutting down..."
+  sudo kill "$SOCAT_PID" 2>/dev/null || true
+  kill "$VOPONO_PID" 2>/dev/null || true
+  wait 2>/dev/null
+}
+trap cleanup EXIT INT TERM
+
+# Wait for vopono to exit (it's the long-lived process)
+wait "$VOPONO_PID"

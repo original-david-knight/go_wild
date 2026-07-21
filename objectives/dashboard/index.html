@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoWild Objectives</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>
+            <span class="logo">&#9678;</span>
+            GoWild Objectives
+        </h1>
+        <div class="status-indicator">
+            <span id="status-dot" class="status-dot"></span>
+            <span id="status-text">Connecting...</span>
+        </div>
+    </header>
+
+    <div class="main-grid">
+        <!-- Left Panel: Objective Tree -->
+        <div class="panel">
+            <div class="panel-header">
+                Objectives
+                <span id="objective-count" class="count">0</span>
+            </div>
+            <div class="mission-selector">
+                <select id="mission-select" class="mission-select">
+                    <option value="">Select a mission...</option>
+                </select>
+                <button class="mission-delete-btn" id="delete-mission-btn" title="Delete mission">&times;</button>
+            </div>
+            <div class="panel-actions">
+                <button class="action-btn" id="new-mission-btn">+ New Mission</button>
+            </div>
+            <div id="new-mission-form" class="mission-form" style="display: none;">
+                <input id="mission-title" class="mission-input" type="text" placeholder="Mission title..." autofocus>
+                <textarea id="mission-desc" class="mission-textarea" placeholder="Description (optional)..." rows="3"></textarea>
+                <div class="mission-form-actions">
+                    <button class="resolve-btn" id="mission-submit">Create</button>
+                    <button class="cancel-btn" id="mission-cancel">Cancel</button>
+                </div>
+            </div>
+            <div class="panel-body" id="tree-container">
+                <div class="empty-state">Loading objectives...</div>
+            </div>
+        </div>
+
+        <!-- Center: Detail Panel -->
+        <div class="panel">
+            <div class="panel-header">
+                <span id="detail-title">Activity Feed</span>
+            </div>
+            <div class="detail-actions" id="detail-actions" style="display: none;">
+                <button class="detail-btn resume-btn" id="btn-resume">Restart</button>
+                <button class="detail-btn pause-btn" id="btn-pause">Pause</button>
+            </div>
+            <div class="tab-bar">
+                <button class="tab active" data-tab="activity">Activity</button>
+                <button class="tab" data-tab="graphs">Graphs</button>
+            </div>
+            <div class="panel-body tab-content active" id="tab-activity">
+                <div class="empty-state">Loading activity...</div>
+            </div>
+            <div class="panel-body tab-content" id="tab-graphs">
+                <div class="empty-state">Select an objective to see its graphs</div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Escalations -->
+        <div class="panel">
+            <div class="panel-header">
+                Escalations
+                <span id="escalation-count" class="count">0</span>
+            </div>
+            <div class="panel-body" id="escalation-container">
+                <div class="empty-state">Loading escalations...</div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <span id="footer-status">Connecting...</span>
+        <span id="footer-time"></span>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

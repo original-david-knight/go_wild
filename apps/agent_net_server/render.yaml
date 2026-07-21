@@ -1,0 +1,41 @@
+# Render Blueprint for GoWild Agent Net Server
+#
+# Option 1: Deploy via Blueprint (recommended)
+#   render blueprint apply
+#
+# Option 2: Manual setup in Render Dashboard
+#   1. Create PostgreSQL database
+#   2. Create Web Service with Docker
+#   3. Set Dockerfile path to: apps/agent_net_server/Dockerfile
+#   4. Set Docker build context to repo root: .
+#   5. Add environment variables
+
+databases:
+  - name: agent-net-db
+    databaseName: agent_net
+    user: agent_net
+    plan: starter  # Free tier, upgrade as needed
+
+services:
+  - type: web
+    name: agent-net-server
+    runtime: docker
+    plan: starter  # Free tier
+    repo: https://github.com/original-david-knight/go_wild
+    branch: net_site_prod
+    dockerfilePath: ./apps/agent_net_server/Dockerfile
+    dockerContext: .
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: agent-net-db
+          property: connectionString
+      - key: SOLANA_RPC_URL
+        value: https://api.mainnet-beta.solana.com
+      - key: SOLANA_TREASURY
+        sync: false  # Set manually in Render dashboard
+      - key: POW_DIFFICULTY
+        value: "10"
+      - key: UPGRADE_FEE_SOL
+        value: "0.005"
+    healthCheckPath: /health

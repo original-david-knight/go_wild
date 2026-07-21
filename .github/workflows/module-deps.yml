@@ -1,0 +1,23 @@
+name: module-deps-docs
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+
+jobs:
+  module-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Generate module deps doc
+        run: bash scripts/gen_module_deps.sh
+
+      - name: Verify docs are up to date
+        run: git diff --exit-code docs/module-deps.md README.md

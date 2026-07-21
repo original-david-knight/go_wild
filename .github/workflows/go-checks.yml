@@ -1,0 +1,30 @@
+name: go-checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - dev
+      - main
+
+jobs:
+  workspace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.work
+
+      - name: Build workspace modules
+        run: bash ./scripts/workspace_go.sh build ./...
+
+      - name: Test workspace modules
+        run: bash ./scripts/workspace_go.sh test ./...
+
+      - name: Vet workspace modules
+        run: bash ./scripts/workspace_go.sh vet ./...
+
+      - name: Test deep_research
+        run: cd deep_research && GOWORK=off go test ./...

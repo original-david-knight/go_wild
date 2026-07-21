@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Reject any staged file whose content starts with the ELF magic (compiled binary).
+# Enable once with: git config core.hooksPath .githooks
+set -e
+
+bad=()
+while IFS= read -r -d '' file; do
+    [ -f "$file" ] || continue
+    magic=$(head -c 4 -- "$file" 2>/dev/null | od -An -tx1 | tr -d ' \n')
+    if [ "$magic" = "7f454c46" ]; then
+        bad+=("$file")
+    fi
+done < <(git diff --cached --name-only --diff-filter=AM -z)
+
+if [ ${#bad[@]} -gt 0 ]; then
+    echo "ERROR: refusing to commit ELF binaries:" >&2
+    printf '  %s\n' "${bad[@]}" >&2
+    echo "Add the path to .gitignore or remove with 'git rm --cached <file>'." >&2
+    exit 1
+fi

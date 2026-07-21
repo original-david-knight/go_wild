@@ -1,0 +1,13 @@
+# Environment files (contain secrets)
+.env
+.env.local
+.env.production
+
+# Binaries
+cmd/server/server
+*.exe
+
+# IDE
+.idea/
+.vscode/
+agent-net-server

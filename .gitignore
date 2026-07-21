@@ -1,0 +1,99 @@
+# Environment files (contain secrets - NEVER COMMIT)
+.env
+.env.local
+.env.*.local
+.env.production
+!.env.example
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Private keys and credentials
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.json
+
+# Binary executables
+gowild_agent/gowild_agent
+gowild_agent_manager/gowild_agent_manager
+gowild_agent_manager/mcp-broker-server
+apps/agent/gowild_agent
+apps/agent/agent
+apps/agent/gowild_agent_manager
+apps/agent_manager/gowild_agent_manager
+apps/agent_manager/agent_manager
+apps/agent_manager/mcp-broker-server
+apps/mcp-broker-server/gowild_mcp_broker_server
+apps/mcp-broker-server/mcp-broker-server
+apps/agent_net_admin/agent_net_admin
+apps/agent_net_admin/gowild_agent_net_admin
+apps/agent_net_server/agent_net_server
+apps/agent_net_server/gowild_agent_net_server
+apps/objectives/objectives
+apps/objectives/gowild_objectives_cli
+apps/screen_agent/screen_agent
+gowild_agentic_loop/examples/basic/basic
+gowild_agent_net/agent-net-server
+gowild_agent_net/cmd/server/server
+gowild_agent_net/bin/
+gowild_deep_research/gowild_agent
+gowild_deep_research/gowild_agent_manager
+deep_research/gowild_agent
+deep_research/gowild_agent_manager
+agent_net/admin
+objectives/objectives
+gowild_objectives/objectives
+gowild_objectives/gowild_agent_manager
+gowild_polymarket/test_live
+polymarket/test_auth
+/mcp-broker-server
+/agentnode
+/agent
+/agent_net_admin
+/agent_net_server
+
+# Agent runtime files
+memory.md
+memory_archive.md
+soul.md
+skills.json
+
+# Generated files
+keygen_slip10.go
+
+# Claude Code
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+.context/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+__debug_bin*
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Test coverage
+*.coverprofile
+coverage.out
+coverage.html

@@ -1,0 +1,53 @@
+go 1.25
+
+use (
+	./agent_auth
+	./agent_data
+	./agent_net
+	./agent_node
+	./agentic_loop
+	./apps/agent
+	./apps/agent_manager
+	./apps/agent_net_admin
+	./apps/agent_net_server
+	./apps/mcp-broker-server
+	./apps/objectives
+	./apps/polymarket_no_buyer
+	./apps/screen_agent
+	./claudellm
+	./codexllm
+	./crypto
+	./data
+	./deep_research
+	./knowledge_graph
+	./my
+	./objectives
+	./polymarket
+	./tools
+)
+
+replace (
+	github.com/original-david-knight/go_wild/agent_auth v0.0.0 => ./agent_auth
+	github.com/original-david-knight/go_wild/agent_data v0.0.0 => ./agent_data
+	github.com/original-david-knight/go_wild/agent_net v0.0.0 => ./agent_net
+	github.com/original-david-knight/go_wild/agent_node v0.0.0 => ./agent_node
+	github.com/original-david-knight/go_wild/agentic_loop v0.0.0 => ./agentic_loop
+	github.com/original-david-knight/go_wild/apps/agent v0.0.0 => ./apps/agent
+	github.com/original-david-knight/go_wild/apps/agent_manager v0.0.0 => ./apps/agent_manager
+	github.com/original-david-knight/go_wild/apps/agent_net_admin v0.0.0 => ./apps/agent_net_admin
+	github.com/original-david-knight/go_wild/apps/agent_net_server v0.0.0 => ./apps/agent_net_server
+	github.com/original-david-knight/go_wild/apps/mcp-broker-server v0.0.0 => ./apps/mcp-broker-server
+	github.com/original-david-knight/go_wild/apps/objectives v0.0.0 => ./apps/objectives
+	github.com/original-david-knight/go_wild/apps/polymarket_no_buyer v0.0.0 => ./apps/polymarket_no_buyer
+	github.com/original-david-knight/go_wild/apps/screen_agent v0.0.0 => ./apps/screen_agent
+	github.com/original-david-knight/go_wild/claudellm v0.0.0 => ./claudellm
+	github.com/original-david-knight/go_wild/codexllm v0.0.0 => ./codexllm
+	github.com/original-david-knight/go_wild/crypto v0.0.0 => ./crypto
+	github.com/original-david-knight/go_wild/data v0.0.0 => ./data
+	github.com/original-david-knight/go_wild/deep_research v0.0.0 => ./deep_research
+	github.com/original-david-knight/go_wild/knowledge_graph v0.0.0 => ./knowledge_graph
+	github.com/original-david-knight/go_wild/my v0.0.0 => ./my
+	github.com/original-david-knight/go_wild/objectives v0.0.0 => ./objectives
+	github.com/original-david-knight/go_wild/polymarket v0.0.0 => ./polymarket
+	github.com/original-david-knight/go_wild/tools v0.0.0 => ./tools
+)
