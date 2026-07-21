@@ -1,6 +1,6 @@
 # GoWild
 
-GoWild is a Go monorepo for building sandboxed autonomous agents and the services around them: multi-agent orchestration, brokered tool access, shared data/crypto libraries, and an agent-to-agent protocol server.
+GoWild is a Go monorepo with random experimental apps and libraries.  You probably do not want to use this for anything at all.
 
 ## Repository Layout
 
@@ -280,8 +280,10 @@ flowchart LR
   agent --> knowledge_graph
   agent --> my
   agent --> tools
+  agent_auth["agent_auth"]
   agent_data --> data
   agent_data --> knowledge_graph
+  agent_manager --> agent_auth
   agent_manager --> agent_data
   agent_manager --> agent_net
   agent_manager --> agent_node
@@ -325,6 +327,12 @@ flowchart LR
   objectives --> data
   objectives --> my
   polymarket --> crypto
+  polymarket --> my
+  polymarket_no_buyer --> crypto
+  polymarket_no_buyer --> my
+  polymarket_no_buyer --> polymarket
+  screen_agent --> agentic_loop
+  tools --> agent_auth
   tools --> agent_data
   tools --> agentic_loop
   tools --> crypto
