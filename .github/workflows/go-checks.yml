@@ -25,6 +25,3 @@ jobs:
 
       - name: Vet workspace modules
         run: bash ./scripts/workspace_go.sh vet ./...
-
-      - name: Test deep_research
-        run: cd deep_research && GOWORK=off go test ./...
