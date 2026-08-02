@@ -18,6 +18,11 @@ type Database interface {
 	// RunInTransaction executes a function within a transaction.
 	RunInTransaction(ctx context.Context, fn func(tx Database) error) error
 
+	// Ping verifies the connection is still usable, so callers can report
+	// health and reconnect instead of discovering a dead server on the next
+	// query. Transaction views report the enclosing connection.
+	Ping(ctx context.Context) error
+
 	// Close closes the database connection.
 	Close() error
 }

@@ -20,7 +20,8 @@ func (m *mockDatabase) ForUser(userID string) UserDatabase { return nil }
 func (m *mockDatabase) RunInTransaction(ctx context.Context, fn func(tx Database) error) error {
 	return nil
 }
-func (m *mockDatabase) Close() error { return nil }
+func (m *mockDatabase) Ping(ctx context.Context) error { return nil }
+func (m *mockDatabase) Close() error                   { return nil }
 
 type testProvider struct {
 	called bool

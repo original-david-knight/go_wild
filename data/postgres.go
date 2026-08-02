@@ -137,6 +137,11 @@ func (p *PostgresDatabase) RunInTransaction(ctx context.Context, fn func(tx Data
 	return tx.Commit()
 }
 
+// Ping verifies the connection is still usable.
+func (p *PostgresDatabase) Ping(ctx context.Context) error {
+	return p.db.PingContext(ctx)
+}
+
 // Close closes the database connection.
 func (p *PostgresDatabase) Close() error {
 	return p.db.Close()
@@ -193,6 +198,12 @@ func (t *PostgresTxDatabase) ForUser(userID string) UserDatabase {
 
 func (t *PostgresTxDatabase) RunInTransaction(ctx context.Context, fn func(tx Database) error) error {
 	return fn(t) // Already in a transaction
+}
+
+// Ping reports the enclosing connection as usable: an open transaction
+// implies a live connection.
+func (t *PostgresTxDatabase) Ping(ctx context.Context) error {
+	return nil
 }
 
 func (t *PostgresTxDatabase) Close() error {

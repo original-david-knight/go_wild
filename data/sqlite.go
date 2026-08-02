@@ -142,6 +142,11 @@ func (s *SqliteDatabase) RunInTransaction(ctx context.Context, fn func(tx Databa
 	return tx.Commit()
 }
 
+// Ping verifies the connection is still usable.
+func (s *SqliteDatabase) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}
+
 // Close closes the database connection.
 func (s *SqliteDatabase) Close() error {
 	return s.db.Close()
@@ -198,6 +203,12 @@ func (t *SqliteTxDatabase) ForUser(userID string) UserDatabase {
 
 func (t *SqliteTxDatabase) RunInTransaction(ctx context.Context, fn func(tx Database) error) error {
 	return fn(t) // Already in a transaction
+}
+
+// Ping reports the enclosing connection as usable: an open transaction
+// implies a live connection.
+func (t *SqliteTxDatabase) Ping(ctx context.Context) error {
+	return nil
 }
 
 func (t *SqliteTxDatabase) Close() error {
