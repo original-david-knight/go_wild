@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	obj "github.com/original-david-knight/go_wild/objectives"
+	objplan "github.com/original-david-knight/go_wild/objectives_planner"
 )
 
 func TestResolveAgentDBURLPrecedence(t *testing.T) {
@@ -59,17 +59,17 @@ func TestLoadObjectivesConfigFromEnvPrefersObjectivesVars(t *testing.T) {
 }
 
 func TestObjectivesModelsConfigured(t *testing.T) {
-	if objectivesModelsConfigured(obj.Config{}) {
+	if objectivesModelsConfigured(objplan.Config{}) {
 		t.Fatalf("expected empty config to be disabled")
 	}
 
-	if objectivesModelsConfigured(obj.Config{
+	if objectivesModelsConfigured(objplan.Config{
 		Model: "fast",
 	}) {
 		t.Fatalf("expected missing smart model to be disabled")
 	}
 
-	if !objectivesModelsConfigured(obj.Config{
+	if !objectivesModelsConfigured(objplan.Config{
 		Model:      "fast",
 		SmartModel: "smart",
 	}) {

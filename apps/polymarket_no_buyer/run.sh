@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Ensure the Polymarket VPN/SOCKS proxy is up, then start the NO-buyer app.
+# Ensure the Polymarket VPN/SOCKS proxy is up, then start the NO-signal / YES-buyer app.
 #
 # All Polymarket API access (CLOB, Gamma market data, Data positions) must egress
 # through the proxy — Polymarket is geo-restricted. The Polygon JSON-RPC and

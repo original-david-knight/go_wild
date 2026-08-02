@@ -22,6 +22,7 @@ import (
 // built via marketWith(...). A configured wallet is required for runOnce to enter
 // the snapshot/discover/reconcile block.
 func pipelineApp(fake *fakeTradingClient, wallet walletClient, dryRun bool) *App {
+	ensureYesBooks(fake)
 	cfg := defaultConfig()
 	cfg.DryRun = dryRun
 	return &App{
@@ -62,7 +63,7 @@ func buildEligibleMarkets(n int) ([]polymarket.Market, map[string]*polymarket.Or
 	return markets, books
 }
 
-// placedByToken indexes the fake's recorded placements by NO token ID. Each
+// placedByToken indexes the fake's recorded placements by YES token ID. Each
 // eligible market is expected to produce at most one placement.
 func placedByToken(fake *fakeTradingClient) map[string]placedOrder {
 	out := map[string]placedOrder{}
@@ -131,7 +132,7 @@ func TestPipeline_CrossStepPerMarketResilience(t *testing.T) {
 		},
 		redeemErrByCondition: map[string]error{failCond: errors.New("redeem boom")},
 		cancelErrByOrderID:   map[string]error{"stale-fail": errors.New("cancel boom")},
-		placeErrByToken:      map[string]error{failNo: errors.New("place boom")},
+		placeErrByToken:      map[string]error{failYes: errors.New("place boom")},
 	}
 
 	app := pipelineApp(fake, &fakeWallet{balance: "100000"}, false)
@@ -188,14 +189,14 @@ func TestPipeline_CrossStepPerMarketResilience(t *testing.T) {
 	// place_failed reconcile_order log, and the run continued.
 	placedSet := placedByToken(fake)
 	for i := 0; i < 3; i++ {
-		_, noID, _ := pipelineMarketIDs(i)
-		if _, ok := placedSet[noID]; !ok {
-			t.Errorf("healthy market %d (token %s) produced no placement; placed=%v", i, noID, placedSet)
+		_, _, yesID := pipelineMarketIDs(i)
+		if _, ok := placedSet[yesID]; !ok {
+			t.Errorf("healthy market %d (token %s) produced no placement; placed=%v", i, yesID, placedSet)
 		}
 	}
 	// The failing market's placement was attempted (recorded) but errored.
-	if _, ok := placedSet[failNo]; !ok {
-		t.Errorf("failing market placement was not attempted on %s", failNo)
+	if _, ok := placedSet[failYes]; !ok {
+		t.Errorf("failing market placement was not attempted on %s", failYes)
 	}
 	if !reconcileStatusByCondition(events, failCond)["place_failed"] {
 		t.Errorf("failing market %s missing a place_failed reconcile_order", failCond)
@@ -243,14 +244,14 @@ func TestPipeline_BookFetchErrorIsolatesOneMarket(t *testing.T) {
 	// Exactly the three siblings placed; the bad market placed nothing.
 	placed := placedByToken(fake)
 	for i := 0; i < 4; i++ {
-		condID, noID, _ := pipelineMarketIDs(i)
-		_, ok := placed[noID]
+		condID, _, yesID := pipelineMarketIDs(i)
+		_, ok := placed[yesID]
 		if i == 2 {
 			if ok {
 				t.Errorf("bad market %s placed an order, want none", condID)
 			}
 		} else if !ok {
-			t.Errorf("sibling market %s (token %s) produced no placement", condID, noID)
+			t.Errorf("sibling market %s (token %s) produced no placement", condID, yesID)
 		}
 	}
 	if len(fake.placedOrders) != 3 {
@@ -360,12 +361,12 @@ func TestPipeline_IdempotentConvergence(t *testing.T) {
 	}
 
 	// Feed every placed order back as an open order exactly as the venue would report
-	// it: BUY on the NO token, at the placed price, full (already venue-floored) size,
+	// it: BUY on the YES token, at the placed price, full (already venue-floored) size,
 	// the placed expiration. Map each placed token to its source market's condition ID.
 	tokenToCond := map[string]string{}
 	for i := 0; i < 3; i++ {
-		condID, noID, _ := pipelineMarketIDs(i)
-		tokenToCond[noID] = condID
+		condID, _, yesID := pipelineMarketIDs(i)
+		tokenToCond[yesID] = condID
 	}
 	var open []polymarket.Order
 	for i, p := range fake.placedOrders {
@@ -470,7 +471,7 @@ func TestPipeline_DryRunMutatesNothing(t *testing.T) {
 
 // stalePipelineOrder builds a clearly-stale wrong-side (SELL) NO order for the
 // given eligible market. A SELL on the NO token is canceled by the stale pass as a
-// wrong-side order (it is not a NO-buy candidate). Tests may override fields to make
+// wrong-side order (it is not a YES-buy candidate). Tests may override fields to make
 // the order stale in a different, provable way.
 func stalePipelineOrder(id, condID, noID string, closeIn time.Duration) polymarket.Order {
 	return polymarket.Order{

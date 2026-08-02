@@ -27,8 +27,8 @@ type a2aMethodRequest struct {
 	DisableMarketNotes                *bool           `json:"disable_market_notes,omitempty"`
 	DisablePolymarketNoteAugmentation *bool           `json:"disable_polymarket_note_augmentation,omitempty"`
 	DisabledToolGroups                []string        `json:"disabled_tool_groups,omitempty"`
-	CompletionTimestampKey *string `json:"completion_timestamp_key,omitempty"`
-	CompletionSuccessKey  *string `json:"completion_success_key,omitempty"`
+	CompletionTimestampKey            *string         `json:"completion_timestamp_key,omitempty"`
+	CompletionSuccessKey              *string         `json:"completion_success_key,omitempty"`
 }
 
 type a2aMethodCollectionHandlerFunc func(h *Handlers, w http.ResponseWriter, r *http.Request)

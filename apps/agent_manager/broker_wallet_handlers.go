@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/original-david-knight/go_wild/tools"
 	loop "github.com/original-david-knight/go_wild/agentic_loop"
+	"github.com/original-david-knight/go_wild/tools"
 )
 
 const defaultPolygonUSDTeTokenAddress = "0xC2132D05D31c914a87C6611C10748AEb04B58e8F"

@@ -1,4 +1,4 @@
-package objectives
+package objectives_planner
 
 import (
 	"context"
@@ -329,7 +329,7 @@ func TestGetByScheduleType(t *testing.T) {
 	store.Create(ctx, &Objective{Title: "Cron 2", ScheduleType: ScheduleCron, ScheduleCron: "*/5 * * * *"})
 	store.Create(ctx, &Objective{Title: "Continuous", ScheduleType: ScheduleContinuous})
 
-	crons, err := store.getByScheduleType(ctx, ScheduleCron)
+	crons, err := store.GetByScheduleType(ctx, ScheduleCron)
 	if err != nil {
 		t.Fatalf("get by schedule type: %v", err)
 	}

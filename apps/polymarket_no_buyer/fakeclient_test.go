@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -78,7 +79,7 @@ type fakeTradingClient struct {
 
 	// placedOrders records every order submitted via PlaceOrderWithExpiration, in
 	// call order. placeErr, when set, fails every placement; placeErrByToken, when
-	// set, fails placement only for the keyed NO token ID (so one market's placement
+	// set, fails placement only for the keyed YES token ID (so one market's placement
 	// can fail while siblings succeed); placeResp, when set, is the response returned
 	// on success (default: success with a synthetic ID).
 	placedOrders    []placedOrder
@@ -95,6 +96,24 @@ type placedOrder struct {
 	size       float64
 	side       string
 	expiration int64
+}
+
+// ensureYesBooks gives legacy test fixtures an execution book for each synthetic
+// NO signal book. Individual tests can provide a distinct YES book explicitly;
+// this helper never overwrites one.
+func ensureYesBooks(f *fakeTradingClient) {
+	if f == nil || f.books == nil {
+		return
+	}
+	for tokenID, book := range f.books {
+		if !strings.HasPrefix(tokenID, "no") {
+			continue
+		}
+		yesTokenID := "yes" + strings.TrimPrefix(tokenID, "no")
+		if _, exists := f.books[yesTokenID]; !exists {
+			f.books[yesTokenID] = book
+		}
+	}
 }
 
 func (f *fakeTradingClient) record(name string) {

@@ -15,6 +15,7 @@ import (
 	gowild_data "github.com/original-david-knight/go_wild/data"
 	"github.com/original-david-knight/go_wild/my"
 	obj "github.com/original-david-knight/go_wild/objectives"
+	objplan "github.com/original-david-knight/go_wild/objectives_planner"
 )
 
 const defaultAgentDBURL = "postgres://gowild_agent:gowild_agent@localhost:5432/gowild_agent"
@@ -186,8 +187,8 @@ func resolveAgentDBURL(flagValue string) string {
 	return defaultAgentDBURL
 }
 
-func loadObjectivesConfigFromEnv() obj.Config {
-	cfg := obj.NewConfig(
+func loadObjectivesConfigFromEnv() objplan.Config {
+	cfg := objplan.NewConfig(
 		os.Getenv("GEMINI_API_KEY"),
 		os.Getenv("OBJECTIVES_MODEL"),
 		os.Getenv("OBJECTIVES_SMART_MODEL"),
@@ -201,11 +202,11 @@ func loadObjectivesConfigFromEnv() obj.Config {
 	return cfg
 }
 
-func objectivesModelsConfigured(cfg obj.Config) bool {
+func objectivesModelsConfigured(cfg objplan.Config) bool {
 	return cfg.Model != "" && cfg.SmartModel != ""
 }
 
-func startObjectivesScheduler(ctx context.Context, db gowild_data.Database, geminiClient *loop.GeminiClient) *obj.Scheduler {
+func startObjectivesScheduler(ctx context.Context, db gowild_data.Database, geminiClient *loop.GeminiClient) *objplan.Scheduler {
 	if geminiClient == nil {
 		log.Println("Objectives scheduler disabled (no GEMINI_API_KEY)")
 		return nil
@@ -219,23 +220,23 @@ func startObjectivesScheduler(ctx context.Context, db gowild_data.Database, gemi
 
 	objStore := obj.NewObjectiveStore(db, "")
 	objActivity := obj.NewActivityStore(db, "")
-	planner, err := obj.NewStrategicPlanner(objCfg.GeminiAPIKey, objCfg.SmartModel)
+	planner, err := objplan.NewStrategicPlanner(objCfg.GeminiAPIKey, objCfg.SmartModel)
 	if err != nil {
 		log.Printf("Warning: Objectives planner disabled: %v", err)
 		return nil
 	}
 
-	engine := obj.NewExecutionEngine(objCfg, objActivity)
+	engine := objplan.NewExecutionEngine(objCfg, objActivity)
 	engine.SetCompanyToolLoader(buildCompanyToolLoader(db))
-	objMemory := obj.NewMemoryStore(db)
-	evaluator, evalErr := obj.NewPostExecutionEvaluator(objCfg.GeminiAPIKey, objCfg.SmartModel, objMemory)
+	objMemory := objplan.NewMemoryStore(db)
+	evaluator, evalErr := objplan.NewPostExecutionEvaluator(objCfg.GeminiAPIKey, objCfg.SmartModel, objMemory)
 	if evalErr != nil {
 		log.Printf("Warning: Objectives evaluator disabled: %v", evalErr)
 	} else {
 		engine.SetEvaluator(evaluator)
 	}
 
-	objScheduler := obj.NewScheduler(objStore, objActivity, planner, engine, objCfg)
+	objScheduler := objplan.NewScheduler(objStore, objActivity, planner, engine, objCfg)
 	go objScheduler.Run(ctx)
 	log.Println("Objectives scheduler started")
 	return objScheduler

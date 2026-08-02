@@ -1,4 +1,4 @@
-package objectives
+package objectives_planner
 
 import (
 	"google.golang.org/genai"

@@ -1,4 +1,4 @@
-package objectives
+package objectives_planner
 
 import (
 	"context"
@@ -173,7 +173,6 @@ func (s *Scheduler) Stop() {
 	}
 }
 
-
 // cronTicker scans for pending and cron-scheduled objectives every 10 seconds.
 func (s *Scheduler) cronTicker(ctx context.Context) {
 	ticker := time.NewTicker(10 * time.Second)
@@ -199,7 +198,7 @@ func (s *Scheduler) scanPendingObjectives(ctx context.Context) {
 	now := time.Now().UTC()
 
 	for _, status := range []ObjectiveStatus{StatusPending, StatusActive} {
-		objs, err := s.store.getByStatus(ctx, status)
+		objs, err := s.store.GetByStatus(ctx, status)
 		if err != nil {
 			log.Printf("[scheduler] %s scan error: %v", status, err)
 			continue
@@ -228,7 +227,7 @@ func (s *Scheduler) scanPendingObjectives(ctx context.Context) {
 }
 
 func (s *Scheduler) scanCronObjectives(ctx context.Context) {
-	objs, err := s.store.getByScheduleType(ctx, ScheduleCron)
+	objs, err := s.store.GetByScheduleType(ctx, ScheduleCron)
 	if err != nil {
 		log.Printf("[scheduler] cron scan error: %v", err)
 		return
@@ -276,7 +275,7 @@ func (s *Scheduler) continuousEvaluator(ctx context.Context) {
 }
 
 func (s *Scheduler) evaluateActiveObjectives(ctx context.Context) {
-	actives, err := s.store.getByStatus(ctx, StatusActive)
+	actives, err := s.store.GetByStatus(ctx, StatusActive)
 	if err != nil {
 		log.Printf("[scheduler] evaluator scan error: %v", err)
 		return
@@ -602,7 +601,7 @@ func (s *Scheduler) executeLeaf(ctx context.Context, rootID string, leaf *Object
 		return false
 	}
 
-	s.logGraph(ctx, rootID, leaf.Title, planOutput.Reasoning, graph)
+	s.LogGraph(ctx, rootID, leaf.Title, planOutput.Reasoning, graph)
 
 	leaf.Status = StatusActive
 	s.store.Update(ctx, leaf)
@@ -627,7 +626,7 @@ func (s *Scheduler) executeLeaf(ctx context.Context, rootID string, leaf *Object
 	leaf.LastResult = fmt.Sprintf("%d nodes completed, sufficient=%v", nodeCount, results.Sufficient)
 	s.store.Update(ctx, leaf)
 
-	s.activity.logTaskCompleted(ctx, leaf.ID, fmt.Sprintf("Executed %d nodes for: %s", nodeCount, leaf.Title), map[string]any{
+	s.activity.LogTaskCompleted(ctx, leaf.ID, fmt.Sprintf("Executed %d nodes for: %s", nodeCount, leaf.Title), map[string]any{
 		"result_count": nodeCount,
 		"sufficient":   results.Sufficient,
 	})
@@ -836,7 +835,7 @@ func (s *Scheduler) findRootID(ctx context.Context, objectiveID string) string {
 
 // hasPendingEscalations checks if an objective has unresolved escalations.
 func (s *Scheduler) hasPendingEscalations(ctx context.Context, objectiveID string) bool {
-	results, err := s.store.db.Table(Escalation{}).Query(ctx, gowild_data.QueryOpts{
+	results, err := s.store.DB().Table(Escalation{}).Query(ctx, gowild_data.QueryOpts{
 		Where: map[string]any{"objective_id": objectiveID, "status": string(EscalationPending)},
 		Limit: 1,
 	})
@@ -847,7 +846,7 @@ func (s *Scheduler) hasPendingEscalations(ctx context.Context, objectiveID strin
 // Deduplicates: skips questions that already exist (pending or resolved) for this objective.
 func (s *Scheduler) createEscalations(ctx context.Context, objectiveID string, questions []ClarifyingQuestion) {
 	// Gather existing escalation questions for this objective (all statuses)
-	existing, _ := s.store.db.Table(Escalation{}).Query(ctx, gowild_data.QueryOpts{
+	existing, _ := s.store.DB().Table(Escalation{}).Query(ctx, gowild_data.QueryOpts{
 		Where: map[string]any{"objective_id": objectiveID},
 	})
 	existingQuestions := make(map[string]bool)
@@ -872,7 +871,7 @@ func (s *Scheduler) createEscalations(ctx context.Context, objectiveID string, q
 			Status:      EscalationPending,
 			CreatedAt:   time.Now().UTC(),
 		}
-		if err := s.store.db.Table(Escalation{}).Insert(ctx, esc); err != nil {
+		if err := s.store.DB().Table(Escalation{}).Insert(ctx, esc); err != nil {
 			log.Printf("[scheduler] create escalation error: %v", err)
 		}
 		existingQuestions[q.Question] = true
@@ -896,7 +895,7 @@ func (s *Scheduler) buildEscalationMemory(ctx context.Context, objectiveID strin
 	}
 
 	// Include resolved escalation answers
-	results, err := s.store.db.Table(Escalation{}).Query(ctx, gowild_data.QueryOpts{
+	results, err := s.store.DB().Table(Escalation{}).Query(ctx, gowild_data.QueryOpts{
 		Where:   map[string]any{"objective_id": objectiveID, "status": string(EscalationResolved)},
 		OrderBy: "resolved_at",
 	})
@@ -914,7 +913,7 @@ func (s *Scheduler) buildEscalationMemory(ctx context.Context, objectiveID strin
 
 // getUserDirectives returns user_directive events for the given objective, ordered by creation time.
 func (s *Scheduler) getUserDirectives(ctx context.Context, objectiveID string) []*ActivityEvent {
-	results, err := s.activity.db.Table(ActivityEvent{}).Query(ctx, gowild_data.QueryOpts{
+	results, err := s.activity.DB().Table(ActivityEvent{}).Query(ctx, gowild_data.QueryOpts{
 		Where:   map[string]any{"objective_id": objectiveID, "event_type": "user_directive"},
 		OrderBy: "created_at",
 	})
@@ -930,7 +929,7 @@ func (s *Scheduler) getUserDirectives(ctx context.Context, objectiveID string) [
 	return directives
 }
 
-func (s *Scheduler) logGraph(ctx context.Context, objectiveID, title, reasoning string, graph *agentnode.NodeGraph) {
+func (s *Scheduler) LogGraph(ctx context.Context, objectiveID, title, reasoning string, graph *agentnode.NodeGraph) {
 	nodes := make([]map[string]any, 0, len(graph.Nodes))
 	for _, n := range graph.Nodes {
 		node := map[string]any{
@@ -1129,21 +1128,6 @@ func (s *Scheduler) getAllLeaves(ctx context.Context, rootID string) []*Objectiv
 		}
 	}
 	return leaves
-}
-
-// getByScheduleType returns all objectives with the given schedule type.
-func (s *ObjectiveStore) getByScheduleType(ctx context.Context, schedType ScheduleType) ([]*Objective, error) {
-	where := map[string]any{"schedule_type": string(schedType)}
-	if s.companyID != "" {
-		where["company_id"] = s.companyID
-	}
-	results, err := s.db.Table(Objective{}).Query(ctx, gowild_data.QueryOpts{
-		Where: where,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("get by schedule type %s: %w", schedType, err)
-	}
-	return toObjectives(results), nil
 }
 
 // matchesCron checks if a 5-field cron expression (minute hour dom month dow)

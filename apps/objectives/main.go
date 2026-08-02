@@ -13,6 +13,7 @@ import (
 	agentnode "github.com/original-david-knight/go_wild/agent_node"
 	"github.com/original-david-knight/go_wild/data"
 	obj "github.com/original-david-knight/go_wild/objectives"
+	objplan "github.com/original-david-knight/go_wild/objectives_planner"
 )
 
 func main() {
@@ -54,7 +55,7 @@ func printUsage() {
 
 func runMission(mission string) error {
 	ctx := context.Background()
-	cfg := obj.LoadConfig()
+	cfg := objplan.LoadConfig()
 
 	if cfg.GeminiAPIKey == "" {
 		return fmt.Errorf("GEMINI_API_KEY not set")
@@ -77,10 +78,10 @@ func runMission(mission string) error {
 
 	store := obj.NewObjectiveStore(db, "")
 	activity := obj.NewActivityStore(db, "")
-	memory := obj.NewMemoryStore(db)
+	memory := objplan.NewMemoryStore(db)
 
 	// Create evaluator
-	evaluator, err := obj.NewPostExecutionEvaluator(cfg.GeminiAPIKey, cfg.Model, memory)
+	evaluator, err := objplan.NewPostExecutionEvaluator(cfg.GeminiAPIKey, cfg.Model, memory)
 	if err != nil {
 		return fmt.Errorf("create evaluator: %w", err)
 	}
@@ -88,7 +89,7 @@ func runMission(mission string) error {
 	// Step 1: Strategic planning — decompose mission into objective tree
 	log.Printf("Planning mission: %s", mission)
 
-	planner, err := obj.NewStrategicPlanner(cfg.GeminiAPIKey, cfg.SmartModel)
+	planner, err := objplan.NewStrategicPlanner(cfg.GeminiAPIKey, cfg.SmartModel)
 	if err != nil {
 		return fmt.Errorf("create planner: %w", err)
 	}
@@ -133,7 +134,7 @@ func runMission(mission string) error {
 	log.Printf("Created %d root objective(s)", len(roots))
 
 	// Step 3: Tactical planning for each leaf goal
-	engine := obj.NewExecutionEngine(cfg, activity)
+	engine := objplan.NewExecutionEngine(cfg, activity)
 	engine.SetEvaluator(evaluator)
 
 	for _, root := range roots {
@@ -222,7 +223,7 @@ func truncate(s string, n int) string {
 }
 
 func runDaemon() error {
-	cfg := obj.LoadConfig()
+	cfg := objplan.LoadConfig()
 
 	if cfg.GeminiAPIKey == "" {
 		return fmt.Errorf("GEMINI_API_KEY not set")
@@ -244,22 +245,22 @@ func runDaemon() error {
 
 	store := obj.NewObjectiveStore(db, "")
 	activity := obj.NewActivityStore(db, "")
-	memory := obj.NewMemoryStore(db)
+	memory := objplan.NewMemoryStore(db)
 
-	planner, err := obj.NewStrategicPlanner(cfg.GeminiAPIKey, cfg.Model)
+	planner, err := objplan.NewStrategicPlanner(cfg.GeminiAPIKey, cfg.Model)
 	if err != nil {
 		return fmt.Errorf("create planner: %w", err)
 	}
 
-	engine := obj.NewExecutionEngine(cfg, activity)
+	engine := objplan.NewExecutionEngine(cfg, activity)
 
-	evaluator, err := obj.NewPostExecutionEvaluator(cfg.GeminiAPIKey, cfg.Model, memory)
+	evaluator, err := objplan.NewPostExecutionEvaluator(cfg.GeminiAPIKey, cfg.Model, memory)
 	if err != nil {
 		return fmt.Errorf("create evaluator: %w", err)
 	}
 	engine.SetEvaluator(evaluator)
 
-	scheduler := obj.NewScheduler(store, activity, planner, engine, cfg)
+	scheduler := objplan.NewScheduler(store, activity, planner, engine, cfg)
 
 	// Start API server
 	api := obj.NewAPIServer(store, activity)

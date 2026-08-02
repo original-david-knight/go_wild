@@ -120,7 +120,7 @@ func renderHuman(runID, event string, fields map[string]any, verbose bool) (stri
 	case "market_eligibility":
 		label := marketLabel(fields)
 		if fstr(fields, "status") == "eligible" {
-			return fmt.Sprintf("  ✓ eligible: %s — NO mid %s", label, price(ffloat(fields, "no_midpoint"))), verbose
+			return fmt.Sprintf("  ✓ eligible: %s — NO signal %s", label, price(ffloat(fields, "no_midpoint"))), verbose
 		}
 		return fmt.Sprintf("  – skip %s: %s", label, humanReason(fstr(fields, "reason"))), verbose
 
@@ -173,11 +173,11 @@ func renderReconcileOrder(fields map[string]any) (string, bool) {
 	}
 	switch fstr(fields, "status") {
 	case "placed":
-		return fmt.Sprintf("  ✓ placed NO buy: %s — %s @ %s (%s), expires %s%s",
+		return fmt.Sprintf("  ✓ placed YES buy: %s — %s @ %s (%s), expires %s%s",
 			label, num(ffloat(fields, "shares")), price(ffloat(fields, "price")),
 			usd(ffloat(fields, "notional")), expiry(fields["expiration"]), flags), true
 	case "would_place":
-		return fmt.Sprintf("  • would place NO buy: %s — %s @ %s (%s), expires %s%s",
+		return fmt.Sprintf("  • would place YES buy: %s — %s @ %s (%s), expires %s%s",
 			label, num(ffloat(fields, "shares")), price(ffloat(fields, "price")),
 			usd(ffloat(fields, "notional")), expiry(fields["expiration"]), flags), true
 	case "maintained":
@@ -207,6 +207,9 @@ func marketLabel(fields map[string]any) string {
 	}
 	if c := strings.TrimSpace(fstr(fields, "condition_id")); c != "" {
 		return shortID(c)
+	}
+	if t := strings.TrimSpace(fstr(fields, "yes_token_id")); t != "" {
+		return shortID(t)
 	}
 	if t := strings.TrimSpace(fstr(fields, "no_token_id")); t != "" {
 		return shortID(t)

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/original-david-knight/go_wild/agent_data"
-	"github.com/original-david-knight/go_wild/tools/supplier/providers/cjdropshipping"
 	"github.com/original-david-knight/go_wild/tools/shopify"
+	"github.com/original-david-knight/go_wild/tools/supplier/providers/cjdropshipping"
 )
 
 type inventorySyncToolHandlerFunc func(h *BrokerToolsHandler, ctx context.Context, companyID string, inputJSON []byte) (any, error)

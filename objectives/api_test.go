@@ -187,8 +187,8 @@ func TestGetActivity(t *testing.T) {
 	ctx := context.Background()
 
 	// Log some events
-	api.activity.logTaskStarted(ctx, "obj-1", "Starting task")
-	api.activity.logTaskCompleted(ctx, "obj-1", "Task done", nil)
+	api.activity.LogTaskStarted(ctx, "obj-1", "Starting task")
+	api.activity.LogTaskCompleted(ctx, "obj-1", "Task done", nil)
 
 	// GET all activity
 	resp, err := http.Get(ts.URL + "/api/activity")

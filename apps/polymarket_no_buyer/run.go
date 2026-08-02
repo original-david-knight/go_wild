@@ -130,7 +130,8 @@ func (a *App) runOnce(ctx context.Context, logger *Logger) {
 				return
 			}
 
-			// 4. Discover the eligible NO-buying markets. A failure to list markets or
+			// 4. Discover the markets where the unchanged NO signal is eligible for
+			// the reversed YES-buying strategy. A failure to list markets or
 			// fetch positions is fatal for this run's ordering — log and return without
 			// placing any orders rather than reconciling against a partial market set.
 			eligible, err := a.discoverEligibleMarkets(ctx, logger)
@@ -139,8 +140,8 @@ func (a *App) runOnce(ctx context.Context, logger *Logger) {
 				return
 			}
 
-			// 5. Reconcile: place/maintain one NO buy order per eligible market at the
-			// fresh midpoint with the GTD expiry. Per-market failures are isolated.
+			// 5. Reconcile: place/maintain one YES buy order per eligible market at
+			// the fresh YES midpoint with the GTD expiry. Per-market failures are isolated.
 			a.reconcilePass(ctx, logger, snap, eligible)
 		}
 	}

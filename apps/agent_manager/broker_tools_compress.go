@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"google.golang.org/genai"
 	"github.com/original-david-knight/go_wild/my"
+	"google.golang.org/genai"
 )
 
 type compressContentInput struct {

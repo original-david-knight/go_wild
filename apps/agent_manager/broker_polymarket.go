@@ -26,8 +26,8 @@ type cachedPolymarketClient struct {
 
 // polymarketAuthError records a recent auth failure for a company.
 type polymarketAuthError struct {
-	err       error
-	failedAt  time.Time
+	err      error
+	failedAt time.Time
 }
 
 // BrokerPolymarketHandler handles Polymarket proxy requests.

@@ -28,8 +28,8 @@ func TestSizingTargetArithmetic(t *testing.T) {
 	}
 	wantNotional := total * cfg.TargetExposurePct
 	wantShares := wantNotional / midpoint
-	if math.Abs(d.TargetNoShares-wantShares) > sizingEps {
-		t.Errorf("target_no_shares = %v, want %v (notional %v / midpoint %v)", d.TargetNoShares, wantShares, wantNotional, midpoint)
+	if math.Abs(d.TargetShares-wantShares) > sizingEps {
+		t.Errorf("target_no_shares = %v, want %v (notional %v / midpoint %v)", d.TargetShares, wantShares, wantNotional, midpoint)
 	}
 	// Top-up from zero committed equals the full target.
 	if math.Abs(d.TopupShares-wantShares) > sizingEps {
@@ -41,11 +41,11 @@ func TestSizingTargetArithmetic(t *testing.T) {
 	cfg2.TargetExposurePct = 0.05
 	d2 := sizeMarket(total, midpoint, 0.0, 0.0, false, cfg2)
 	want2 := (total * cfg2.TargetExposurePct) / midpoint
-	if math.Abs(d2.TargetNoShares-want2) > sizingEps {
-		t.Errorf("override target_no_shares = %v, want %v", d2.TargetNoShares, want2)
+	if math.Abs(d2.TargetShares-want2) > sizingEps {
+		t.Errorf("override target_no_shares = %v, want %v", d2.TargetShares, want2)
 	}
-	if math.Abs(d2.TargetNoShares-d.TargetNoShares) < sizingEps {
-		t.Errorf("changing TargetExposurePct did not change the target (%v vs %v)", d.TargetNoShares, d2.TargetNoShares)
+	if math.Abs(d2.TargetShares-d.TargetShares) < sizingEps {
+		t.Errorf("changing TargetExposurePct did not change the target (%v vs %v)", d.TargetShares, d2.TargetShares)
 	}
 }
 
@@ -72,52 +72,52 @@ func TestSizingCommittedExposure(t *testing.T) {
 		{AssetID: noTok, Side: "BUY", OriginalSize: "7", SizeMatched: "9"},   // negative remainder clamped to 0
 	}
 
-	if got, want := heldNoShares(positions, noTok), 30.0; math.Abs(got-want) > sizingEps {
-		t.Errorf("heldNoShares = %v, want %v", got, want)
+	if got, want := heldOutcomeShares(positions, noTok), 30.0; math.Abs(got-want) > sizingEps {
+		t.Errorf("heldOutcomeShares = %v, want %v", got, want)
 	}
-	if got, want := openNoBuyRemaining(orders, noTok), 45.0; math.Abs(got-want) > sizingEps {
-		t.Errorf("openNoBuyRemaining = %v, want %v (40 + 5 + 0 + 0)", got, want)
+	if got, want := openOutcomeBuyRemaining(orders, noTok), 45.0; math.Abs(got-want) > sizingEps {
+		t.Errorf("openOutcomeBuyRemaining = %v, want %v (40 + 5 + 0 + 0)", got, want)
 	}
-	if got, want := committedNoShares(positions, orders, noTok), 75.0; math.Abs(got-want) > sizingEps {
-		t.Errorf("committedNoShares = %v, want %v (held 30 + open 45)", got, want)
+	if got, want := committedOutcomeShares(positions, orders, noTok), 75.0; math.Abs(got-want) > sizingEps {
+		t.Errorf("committedOutcomeShares = %v, want %v (held 30 + open 45)", got, want)
 	}
 
 	// Held-only and open-buy-only isolations.
-	if got, want := committedNoShares(positions, nil, noTok), 30.0; math.Abs(got-want) > sizingEps {
+	if got, want := committedOutcomeShares(positions, nil, noTok), 30.0; math.Abs(got-want) > sizingEps {
 		t.Errorf("held-only committed = %v, want 30", got)
 	}
-	if got, want := committedNoShares(nil, orders, noTok), 45.0; math.Abs(got-want) > sizingEps {
+	if got, want := committedOutcomeShares(nil, orders, noTok), 45.0; math.Abs(got-want) > sizingEps {
 		t.Errorf("open-buy-only committed = %v, want 45", got)
 	}
 }
 
-// TestSizingYesOwnedBranch verifies that any YES owned skips with reason
-// yes_owned before any target/top-up computation: TopupShares is 0 and the
+// TestSizingOpposingOwnedBranch verifies that an opposing NO holding skips with
+// reason no_shares_owned before any target/top-up computation: TopupShares is 0 and the
 // target is never computed.
-func TestSizingYesOwnedBranch(t *testing.T) {
+func TestSizingOpposingOwnedBranch(t *testing.T) {
 	cfg := sizingCfg()
 	// Even with a huge total and zero committed (which would otherwise produce a
-	// large top-up), YES owned short-circuits.
+	// large top-up), opposing ownership short-circuits.
 	d := sizeMarket(1_000_000, 0.9, 0.0, 0.0, true, cfg)
 	if !d.Skip {
-		t.Fatalf("YES owned must skip, got %+v", d)
+		t.Fatalf("opposing outcome owned must skip, got %+v", d)
 	}
-	// Reuse the existing skipYesSharesOwned constant ("yes_shares_owned").
-	if d.Reason != skipYesSharesOwned {
-		t.Errorf("reason = %q, want %q", d.Reason, skipYesSharesOwned)
+	// Reuse the eligibility ownership reason.
+	if d.Reason != skipNoSharesOwned {
+		t.Errorf("reason = %q, want %q", d.Reason, skipNoSharesOwned)
 	}
-	if string(d.Reason) != "yes_shares_owned" {
-		t.Errorf("reason string = %q, want %q", d.Reason, "yes_shares_owned")
+	if string(d.Reason) != "no_shares_owned" {
+		t.Errorf("reason string = %q, want %q", d.Reason, "no_shares_owned")
 	}
 	if d.TopupShares != 0 {
-		t.Errorf("TopupShares = %v, want 0 (no sizing on YES-owned)", d.TopupShares)
+		t.Errorf("TopupShares = %v, want 0 (no sizing with opposing shares)", d.TopupShares)
 	}
-	if d.TargetNoShares != 0 || d.CommittedNoShares != 0 {
-		t.Errorf("YES branch must precede sizing; target/committed should be unset, got %+v", d)
+	if d.TargetShares != 0 || d.CommittedShares != 0 {
+		t.Errorf("ownership branch must precede sizing; target/committed should be unset, got %+v", d)
 	}
 }
 
-// TestSizingTopupBranching covers the three sizing outcomes once past the YES
+// TestSizingTopupBranching covers the three sizing outcomes once past ownership
 // branch: at-or-over target, a normal top-up, and a below-min top-up, and asserts
 // the top-up never pushes committed above target.
 func TestSizingTopupBranching(t *testing.T) {
@@ -176,10 +176,10 @@ func TestSizingNonPositiveMidpoint(t *testing.T) {
 	cfg := sizingCfg()
 	for _, mid := range []float64{0.0, -0.5} {
 		d := sizeMarket(10_000, mid, 1.0, 0.0, false, cfg)
-		if !d.Skip || d.Reason != skipNoTwoSidedBook {
-			t.Errorf("midpoint=%v: want skip no-two-sided-book, got %+v", mid, d)
+		if !d.Skip || d.Reason != skipYesTwoSidedBook {
+			t.Errorf("midpoint=%v: want skip yes-two-sided-book, got %+v", mid, d)
 		}
-		if d.TopupShares != 0 || math.IsInf(d.TargetNoShares, 0) || math.IsNaN(d.TargetNoShares) {
+		if d.TopupShares != 0 || math.IsInf(d.TargetShares, 0) || math.IsNaN(d.TargetShares) {
 			t.Errorf("midpoint=%v: must not produce Inf/NaN/topup, got %+v", mid, d)
 		}
 	}
@@ -195,7 +195,7 @@ func TestSizingDeterminism(t *testing.T) {
 		{AssetID: noTok, Side: "BUY", OriginalSize: "40", SizeMatched: "15"},
 	}
 	cfg := sizingCfg()
-	committed := committedNoShares(positions, orders, noTok)
+	committed := committedOutcomeShares(positions, orders, noTok)
 
 	first := sizeMarket(12_345.67, 0.93, 1.0, committed, false, cfg)
 	for i := 0; i < 100; i++ {

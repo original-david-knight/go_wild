@@ -7,10 +7,10 @@ import (
 	"time"
 
 	data "github.com/original-david-knight/go_wild/agent_data"
-	"github.com/original-david-knight/go_wild/tools/supplier/providers/cjdropshipping"
 	"github.com/original-david-knight/go_wild/tools/amazon"
 	"github.com/original-david-knight/go_wild/tools/supplier"
 	"github.com/original-david-knight/go_wild/tools/supplier/providers"
+	"github.com/original-david-knight/go_wild/tools/supplier/providers/cjdropshipping"
 )
 
 func companyPolymarketToResponse(conn *data.CompanyPolymarketConnection) map[string]any {

@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
-	"net/http"
 	"github.com/original-david-knight/go_wild/agent_data"
 	"github.com/original-david-knight/go_wild/tools"
+	"log"
+	"net/http"
 )
 
 // BrokerEmailHandler handles email proxy requests.

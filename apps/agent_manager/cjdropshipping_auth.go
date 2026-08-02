@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/original-david-knight/go_wild/agent_data"
-	"github.com/original-david-knight/go_wild/tools/supplier/providers/cjdropshipping"
 	gowild_data "github.com/original-david-knight/go_wild/data"
+	"github.com/original-david-knight/go_wild/tools/supplier/providers/cjdropshipping"
 )
 
 const cjdropshippingTokenRefreshSkew = 2 * time.Minute

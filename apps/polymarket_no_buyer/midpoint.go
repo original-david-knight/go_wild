@@ -16,6 +16,14 @@ type noMidpoint struct {
 	Midpoint  float64
 }
 
+// yesMidpoint is the two-sided YES quote used to price the reversed order. The
+// strategy still qualifies markets with noMidpoint, then executes on this quote.
+type yesMidpoint struct {
+	BestYesBid float64
+	BestYesAsk float64
+	Midpoint   float64
+}
+
 // bestBidPrice returns the highest bid price in the book. Order-book ordering is
 // not guaranteed, so the best bid is computed as the MAX over all bid prices.
 // The bool is false when there is no parseable bid (empty side or all entries
@@ -73,6 +81,24 @@ func computeNoMidpoint(book *polymarket.OrderBookDetail) (noMidpoint, skipReason
 		BestNoBid: bid,
 		BestNoAsk: ask,
 		Midpoint:  (bid + ask) / 2,
+	}, ""
+}
+
+// computeYesMidpoint derives the YES midpoint from the YES token's detailed
+// order book. Like computeNoMidpoint, it requires a genuinely two-sided book.
+func computeYesMidpoint(book *polymarket.OrderBookDetail) (yesMidpoint, skipReason) {
+	if book == nil {
+		return yesMidpoint{}, skipYesTwoSidedBook
+	}
+	bid, haveBid := bestBidPrice(book.Bids)
+	ask, haveAsk := bestAskPrice(book.Asks)
+	if !haveBid || !haveAsk {
+		return yesMidpoint{}, skipYesTwoSidedBook
+	}
+	return yesMidpoint{
+		BestYesBid: bid,
+		BestYesAsk: ask,
+		Midpoint:   (bid + ask) / 2,
 	}, ""
 }
 

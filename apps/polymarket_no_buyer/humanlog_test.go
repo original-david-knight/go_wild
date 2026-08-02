@@ -79,7 +79,7 @@ func TestHumanLog_FormatsActions(t *testing.T) {
 	placed, _ := renderHuman("run_x", "reconcile_order", map[string]any{
 		"status": "placed", "question": "Q", "shares": 12.5, "price": 0.91, "notional": 11.38, "expiration": exp,
 	}, false)
-	for _, want := range []string{"placed NO buy", "\"Q\"", "12.5", "$0.91", "$11.38", "expires"} {
+	for _, want := range []string{"placed YES buy", "\"Q\"", "12.5", "$0.91", "$11.38", "expires"} {
 		if !strings.Contains(placed, want) {
 			t.Errorf("placed line missing %q: %q", want, placed)
 		}

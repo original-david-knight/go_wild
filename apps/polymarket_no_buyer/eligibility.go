@@ -49,9 +49,9 @@ const (
 	skipMidpointTooLow  skipReason = "no_midpoint_too_low"
 	skipMidpointTooHigh skipReason = "no_midpoint_too_high"
 
-	// Ownership skip: the account already holds YES shares for this market, so it
-	// is not a NO-buying candidate.
-	skipYesSharesOwned skipReason = "yes_shares_owned"
+	// Ownership skip: the account already holds NO shares for this market, so it
+	// is not a YES-buying candidate.
+	skipNoSharesOwned skipReason = "no_shares_owned"
 )
 
 // endDateLayouts are the accepted EndDate (endDateIso/endDate) string layouts, in
@@ -85,7 +85,7 @@ func parseEndDate(raw string) (time.Time, bool) {
 
 // marketPreCheck runs every eligibility criterion that does NOT require the live
 // order book — market state, binary structure, close-time window, liquidity, and
-// YES ownership. Discovery runs this against every scanned market and only fetches
+// NO ownership. Discovery runs this against every scanned market and only fetches
 // the (expensive) order book for the few that pass, so a run does not make a
 // network call per market. It returns skipReason("") when the cheap checks pass.
 func marketPreCheck(
@@ -160,9 +160,10 @@ func marketPreCheck(
 		return skipLiquidityTooLow
 	}
 
-	// 6. Ownership: the account must not already hold YES shares for this market.
-	if ownedTokenIDs[tokens.YesTokenID] {
-		return skipYesSharesOwned
+	// 6. Ownership: the account must not already hold NO shares for this market.
+	// YES holdings are part of the desired position and are handled by sizing.
+	if ownedTokenIDs[tokens.NoTokenID] {
+		return skipNoSharesOwned
 	}
 
 	return ""

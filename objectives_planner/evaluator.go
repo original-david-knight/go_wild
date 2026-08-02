@@ -1,4 +1,4 @@
-package objectives
+package objectives_planner
 
 import (
 	"context"
@@ -95,7 +95,7 @@ func (e *PostExecutionEvaluator) Evaluate(ctx context.Context, objective *Object
 		entry := &KnowledgeEntry{
 			ObjectiveID: objective.ID,
 			Fact:        f.Fact,
-			Source:       "evaluator",
+			Source:      "evaluator",
 			Tags:        f.Tags,
 			Confidence:  f.Confidence,
 		}

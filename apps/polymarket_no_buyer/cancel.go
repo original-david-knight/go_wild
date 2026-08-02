@@ -54,13 +54,13 @@ func (a *App) stalePass(ctx context.Context, logger *Logger) error {
 
 // marketCancelContext is the per-market state the cancel decision needs: the
 // market-level ineligibility reason (empty when eligible), whether the account
-// owns YES shares for it, the market's NO token ID, the normalized NO midpoint and
-// its tick size, the expected order expiration, and whether the venue tick is
-// known. It is derived once per market and reused for every order on it.
+// owns NO shares for it, the market's YES token ID, the normalized YES execution
+// midpoint and its tick size, the expected order expiration, and whether the venue
+// tick is known. It is derived once per market and reused for every order on it.
 type marketCancelContext struct {
 	ineligible     skipReason
-	yesOwned       bool
-	noTokenID      string
+	noOwned        bool
+	yesTokenID     string
 	midpoint       float64
 	haveMidpoint   bool
 	tickSize       float64
@@ -74,7 +74,7 @@ type orderVerdict int
 const (
 	// verdictCancel: the order is provably stale and must be canceled.
 	verdictCancel orderVerdict = iota
-	// verdictCandidate: a fully-proven matching NO-buy order (side, asset,
+	// verdictCandidate: a fully-proven matching YES-buy order (side, asset,
 	// normalized price, expiration all verified). Dedup-eligible: at most one
 	// survives, the rest are canceled as duplicates.
 	verdictKeepCandidate
@@ -95,7 +95,7 @@ func (a *App) staleCancelMarket(ctx context.Context, logger *Logger, conditionID
 		return
 	}
 
-	// Track NO-buy orders that match every order-level criterion (right side,
+	// Track YES-buy orders that match every order-level criterion (right side,
 	// asset, normalized price, expiration). At most one such order survives as the
 	// reconciliation candidate; any extras are canceled as duplicates. The survivor
 	// is chosen deterministically as the lowest order ID.
@@ -140,12 +140,12 @@ func (a *App) staleCancelMarket(ctx context.Context, logger *Logger, conditionID
 }
 
 // buildMarketCancelContext fetches the Gamma market, decodes its binary tokens,
-// fetches the NO book + midpoint, and fetches positions to derive the per-market
-// cancel context. It returns ok=false (and logs) when any required fetch fails or
-// the market is not a decodable binary market for the purpose of locating its NO
-// token — fail closed so the caller skips the market's orders. A market-level
-// eligibility reason (closed/inactive/etc.) does NOT make ok=false: the market was
-// evaluated successfully and its orders should be canceled.
+// fetches the NO signal book, positions, and (for an otherwise eligible market)
+// the YES execution book to derive the per-market cancel context. It returns
+// ok=false (and logs) when any required fetch fails or the market is not a
+// decodable binary market for the purpose of locating its strategy tokens. A
+// market-level eligibility reason (closed/inactive/etc.) does NOT make ok=false:
+// the market was evaluated successfully and its orders should be canceled.
 func (a *App) buildMarketCancelContext(ctx context.Context, logger *Logger, conditionID string) (marketCancelContext, bool) {
 	market, err := a.trading.GetMarket(ctx, conditionID)
 	if err != nil {
@@ -159,14 +159,10 @@ func (a *App) buildMarketCancelContext(ctx context.Context, logger *Logger, cond
 
 	tokens, tokensReason := decodeBinaryTokens(*market)
 
-	// Fetch the NO book once for both the midpoint and the venue tick size. The book
-	// is only meaningful when tokens decoded; for a non-binary market we cannot
-	// locate a NO token, so we skip the book and let the eligibility predicate
-	// surface the decode reason as a market-level cancel.
-	var mid noMidpoint
-	haveMidpoint := false
-	var tickSize float64
-	haveTick := false
+	// Fetch the NO signal book. For a non-binary market we cannot locate either
+	// strategy token, so skip the book and let eligibility surface the decode reason.
+	var noMid noMidpoint
+	haveNoMidpoint := false
 	if tokensReason == "" {
 		book, err := a.trading.GetOrderBookDetailed(ctx, tokens.NoTokenID)
 		if err != nil {
@@ -180,12 +176,8 @@ func (a *App) buildMarketCancelContext(ctx context.Context, logger *Logger, cond
 			return marketCancelContext{}, false
 		}
 		var midReason skipReason
-		mid, midReason = computeNoMidpoint(book)
-		haveMidpoint = midReason == ""
-		if v := float64(book.TickSize); v > 0 {
-			tickSize = v
-			haveTick = true
-		}
+		noMid, midReason = computeNoMidpoint(book)
+		haveNoMidpoint = midReason == ""
 	}
 
 	positions, err := a.trading.GetPositions(ctx)
@@ -200,23 +192,17 @@ func (a *App) buildMarketCancelContext(ctx context.Context, logger *Logger, cond
 	owned := ownedTokenIDs(positions)
 
 	now := a.now()
-	ineligible := isMarketEligible(*market, now, a.cfg, owned, tokens, tokensReason, mid, haveMidpoint)
+	ineligible := isMarketEligible(*market, now, a.cfg, owned, tokens, tokensReason, noMid, haveNoMidpoint)
 
-	// A YES-owned market is reported by the predicate as skipYesSharesOwned, but it
+	// A NO-owned market is reported by the predicate as skipNoSharesOwned, but it
 	// is a distinct cancel reason: surface it separately so the order log states the
-	// account holds YES rather than a generic market fault.
-	yesOwned := tokensReason == "" && owned[tokens.YesTokenID]
+	// account holds NO rather than a generic market fault.
+	noOwned := tokensReason == "" && owned[tokens.NoTokenID]
 
 	mctx := marketCancelContext{
-		ineligible:   ineligible,
-		yesOwned:     yesOwned,
-		noTokenID:    tokens.NoTokenID,
-		haveMidpoint: haveMidpoint,
-		haveTick:     haveTick,
-		tickSize:     tickSize,
-	}
-	if haveMidpoint {
-		mctx.midpoint = mid.Midpoint
+		ineligible: ineligible,
+		noOwned:    noOwned,
+		yesTokenID: tokens.YesTokenID,
 	}
 
 	// Expected expiration = close_time - OrderExpiryBeforeClose, in unix seconds.
@@ -226,47 +212,76 @@ func (a *App) buildMarketCancelContext(ctx context.Context, logger *Logger, cond
 		mctx.expectedExpiry = closeAt.Add(-a.cfg.OrderExpiryBeforeClose).Unix()
 	}
 
+	// Market-level ineligibility is already enough to classify every order for
+	// cancellation, so no execution quote is needed.
+	if ineligible != "" {
+		return mctx, true
+	}
+
+	// Fetch the YES book for the price/tick of the order the reversed strategy
+	// wants to keep. A fetch failure is unverifiable, so fail closed for this market.
+	yesBook, err := a.trading.GetOrderBookDetailed(ctx, tokens.YesTokenID)
+	if err != nil {
+		logger.Event("stale_error", map[string]any{
+			"condition_id": conditionID,
+			"stage":        "get_yes_book",
+			"error":        err.Error(),
+		})
+		return marketCancelContext{}, false
+	}
+	yesMid, yesMidReason := computeYesMidpoint(yesBook)
+	if yesMidReason != "" {
+		mctx.ineligible = yesMidReason
+		return mctx, true
+	}
+	mctx.midpoint = yesMid.Midpoint
+	mctx.haveMidpoint = true
+	if v := float64(yesBook.TickSize); v > 0 {
+		mctx.tickSize = v
+		mctx.haveTick = true
+	}
+
 	return mctx, true
 }
 
 // classifyOrder applies the order-level cancel criteria in a fixed, deterministic
 // order. It returns the deciding cancelReason and an optional underlying reason
 // string (the market-level skipReason for cancelMarketIneligible), plus
-// matches=true when the order is a fully-matching NO-buy candidate that must be
+// matches=true when the order is a fully-matching YES-buy candidate that must be
 // KEPT for the reconciliation pass (subject to duplicate resolution by the caller).
 //
 // Criteria order (first match wins):
 //  1. market-level ineligibility (closed/inactive/etc., or non-binary)
-//  2. account owns YES shares for the market
+//  2. account owns NO shares for the market
 //  3. wrong side (not BUY)
-//  4. wrong asset (not the NO token)
+//  4. wrong asset (not the YES token)
 //  5. normalized price != normalized midpoint
 //  6. expiration != close - OrderExpiryBeforeClose
 //
 // Amount (size) is deliberately never consulted: it is reconciled in a later rung.
 func (a *App) classifyOrder(o polymarket.Order, mctx marketCancelContext) (cancelReason, string, orderVerdict) {
-	// 1. Market-level ineligibility (excluding the YES-owned case, which we report
+	// 1. Market-level ineligibility (excluding the NO-owned case, which we report
 	// as its own reason below). A non-binary market surfaces here too.
-	if mctx.ineligible != "" && mctx.ineligible != skipYesSharesOwned {
+	if mctx.ineligible != "" && mctx.ineligible != skipNoSharesOwned {
 		return cancelMarketIneligible, mctx.ineligible.String(), verdictCancel
 	}
 
-	// 2. YES shares owned for this market.
-	if mctx.yesOwned {
-		return cancelYesSharesOwned, "", verdictCancel
+	// 2. NO shares owned for this market.
+	if mctx.noOwned {
+		return cancelNoSharesOwned, "", verdictCancel
 	}
 
-	// 3. Wrong side: only NO BUY orders are part of the strategy.
+	// 3. Wrong side: only YES BUY orders are part of the strategy.
 	if !strings.EqualFold(strings.TrimSpace(o.Side), "BUY") {
 		return cancelWrongSide, "", verdictCancel
 	}
 
-	// 4. Wrong asset: the order must be on the market's NO token.
-	if o.AssetID != mctx.noTokenID {
+	// 4. Wrong asset: the order must be on the market's YES token.
+	if o.AssetID != mctx.yesTokenID {
 		return cancelWrongAsset, "", verdictCancel
 	}
 
-	// 5. Normalized price must equal the normalized NO midpoint — but only when the
+	// 5. Normalized price must equal the normalized YES midpoint — but only when the
 	// price is provable: both the venue tick AND a usable midpoint are known. When
 	// either is unknown we cannot prove the price is stale, so we do NOT cancel on a
 	// price mismatch (fail closed).

@@ -1,4 +1,4 @@
-package objectives
+package objectives_planner
 
 import (
 	"context"
@@ -86,7 +86,7 @@ func (e *ExecutionEngine) Execute(ctx context.Context, objective *Objective, gra
 
 	// Log start
 	if e.activityLog != nil {
-		e.activityLog.logTaskStarted(ctx, objective.ID, fmt.Sprintf("Executing %d nodes for: %s", len(graph.Nodes), objective.Title))
+		e.activityLog.LogTaskStarted(ctx, objective.ID, fmt.Sprintf("Executing %d nodes for: %s", len(graph.Nodes), objective.Title))
 	}
 
 	// Build node def index for enriching activity logs
@@ -124,7 +124,7 @@ func (e *ExecutionEngine) Execute(ctx context.Context, objective *Objective, gra
 
 	// Log completion
 	if e.activityLog != nil {
-		e.activityLog.logTaskCompleted(ctx, objective.ID, fmt.Sprintf("Completed %d nodes for: %s", len(graph.Nodes), objective.Title), map[string]any{
+		e.activityLog.LogTaskCompleted(ctx, objective.ID, fmt.Sprintf("Completed %d nodes for: %s", len(graph.Nodes), objective.Title), map[string]any{
 			"node_count":   len(graph.Nodes),
 			"result_count": len(results),
 		})

@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	data "github.com/original-david-knight/go_wild/agent_data"
-	loop "github.com/original-david-knight/go_wild/agentic_loop"
 	agentnode "github.com/original-david-knight/go_wild/agent_node"
+	loop "github.com/original-david-knight/go_wild/agentic_loop"
 	gowild_data "github.com/original-david-knight/go_wild/data"
 	"github.com/original-david-knight/go_wild/tools/amazon"
 	"github.com/original-david-knight/go_wild/tools/shopify"

@@ -7,7 +7,7 @@ import (
 )
 
 // Sources a resolved venue minimum order size can be attributed to. They mirror
-// the precedence the resolver applies: the already-fetched NO order book wins
+// the precedence the resolver applies: the already-fetched execution order book wins
 // over the clob-market mos, which in turn wins over the test-only fallback. Real
 // venue data always beats the fallback so the app fails closed on bad config.
 const (
@@ -19,7 +19,7 @@ const (
 // resolveMinOrderSize determines the per-market venue minimum order size and the
 // source it was read from, applying a fail-closed precedence:
 //
-//  1. order_book      — the already-fetched NO book's min_order_size, if positive.
+//  1. order_book      — the already-fetched YES book's min_order_size, if positive.
 //     GetClobMarket is NOT called in this case.
 //  2. clob_markets_mos — else GetClobMarket(conditionID).MinOrderSize(), if positive.
 //  3. fallback         — else the test-only Config.MinOrderSizeFallback, but only

@@ -18,4 +18,3 @@ func TestParseRuntimeFlags(t *testing.T) {
 		t.Fatalf("cleaned flags = %v, want %v", cleaned, want)
 	}
 }
-

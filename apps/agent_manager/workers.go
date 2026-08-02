@@ -7,8 +7,8 @@ import (
 	"log"
 	"sync"
 
-	"github.com/original-david-knight/go_wild/tools"
 	gowild_data "github.com/original-david-knight/go_wild/data"
+	"github.com/original-david-knight/go_wild/tools"
 )
 
 // Worker is the interface for background workers.

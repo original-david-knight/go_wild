@@ -6,6 +6,7 @@ require (
 	github.com/original-david-knight/go_wild/agent_node v0.0.0
 	github.com/original-david-knight/go_wild/data v0.0.0
 	github.com/original-david-knight/go_wild/objectives v0.0.0
+	github.com/original-david-knight/go_wild/objectives_planner v0.0.0
 )
 
 require (

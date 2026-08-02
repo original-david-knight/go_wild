@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/original-david-knight/go_wild/agent_data"
-	"github.com/original-david-knight/go_wild/tools"
-	gowild_data "github.com/original-david-knight/go_wild/data"
 	"github.com/google/uuid"
+	"github.com/original-david-knight/go_wild/agent_data"
+	gowild_data "github.com/original-david-knight/go_wild/data"
+	"github.com/original-david-knight/go_wild/tools"
 )
 
 // TelegramWorker monitors Telegram messages for an agent.

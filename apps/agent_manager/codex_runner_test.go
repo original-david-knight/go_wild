@@ -445,9 +445,9 @@ func TestExtractTOMLSectionNameRecognisesHeaders(t *testing.T) {
 		{`]`, "", false},           // multi-line array closer
 		{``, "", false},
 		{`#[mcp_servers.broker]`, "", false}, // commented-out header
-		{`[abc`, "", false},                   // missing ] — reaches single-bracket branch
-		{`[[abc`, "", false},                  // missing ]] — reaches array-of-tables branch
-		{`[[ `, "", false},                    // [[ with no ]] and no name
+		{`[abc`, "", false},                  // missing ] — reaches single-bracket branch
+		{`[[abc`, "", false},                 // missing ]] — reaches array-of-tables branch
+		{`[[ `, "", false},                   // [[ with no ]] and no name
 		// TOML spec equivalences: whitespace around dots is ignored, and a
 		// dotted key segment can be bare OR ASCII-quoted. All of these
 		// refer to the same table as [mcp_servers.broker] and must be

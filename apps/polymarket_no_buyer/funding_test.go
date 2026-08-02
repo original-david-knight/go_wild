@@ -49,7 +49,7 @@ func TestBudgetReservedExactlyNotional(t *testing.T) {
 
 	b := newRunBudget(wallet)
 	// A plain fundable top-up of 100 shares.
-	d := sizingDecision{TopupShares: 100, TargetNoShares: 100, CommittedNoShares: 0}
+	d := sizingDecision{TopupShares: 100, TargetShares: 100, CommittedShares: 0}
 	res := fundOrder(d, midpoint, minOrder, b)
 	if !res.Place || res.PartialFill || res.MinOrderException {
 		t.Fatalf("want full place, got %+v", res)
@@ -77,7 +77,7 @@ func TestBudgetNeverExceedsWalletAcrossManyMarkets(t *testing.T) {
 	prev := b.Remaining()
 	for i := 0; i < 200; i++ {
 		// Each market wants a 30-share top-up (notional 27); the budget caps total.
-		d := sizingDecision{TopupShares: 30, TargetNoShares: 30, CommittedNoShares: 0}
+		d := sizingDecision{TopupShares: 30, TargetShares: 30, CommittedShares: 0}
 		res := fundOrder(d, midpoint, minOrder, b)
 		if res.Place {
 			sumPlaced += res.Notional
@@ -106,7 +106,7 @@ func TestMinOrderExceptionBumpsNewPosition(t *testing.T) {
 
 	b := newRunBudget(1000.0)
 	// A new position whose computed top-up fell below the venue minimum.
-	d := sizingDecision{Skip: true, Reason: skipTopupBelowMin, TopupShares: 0, CommittedNoShares: 0, TargetNoShares: 2}
+	d := sizingDecision{Skip: true, Reason: skipTopupBelowMin, TopupShares: 0, CommittedShares: 0, TargetShares: 2}
 	res := fundOrder(d, midpoint, minOrder, b)
 
 	if !res.Place {
@@ -139,7 +139,7 @@ func TestMinOrderExceptionSkipsWhenBudgetShort(t *testing.T) {
 	minNotional := minOrder * midpoint // 4.75
 
 	b := newRunBudget(minNotional - 0.01) // just short of the minimum notional
-	d := sizingDecision{Skip: true, Reason: skipTopupBelowMin, CommittedNoShares: 0}
+	d := sizingDecision{Skip: true, Reason: skipTopupBelowMin, CommittedShares: 0}
 	res := fundOrder(d, midpoint, minOrder, b)
 
 	if !res.Skip || res.Reason != skipBudgetBelowMin {
@@ -164,7 +164,7 @@ func TestMinOrderExceptionOnlyForNewPosition(t *testing.T) {
 	const minOrder = 5.0
 
 	b := newRunBudget(1000.0)
-	d := sizingDecision{Skip: true, Reason: skipTopupBelowMin, CommittedNoShares: 12.5}
+	d := sizingDecision{Skip: true, Reason: skipTopupBelowMin, CommittedShares: 12.5}
 	res := fundOrder(d, midpoint, minOrder, b)
 
 	if !res.Skip || res.Reason != skipTopupBelowMin {
@@ -182,8 +182,8 @@ func TestMinOrderExceptionOnlyForNewPosition(t *testing.T) {
 // their reason and fund nothing.
 func TestFundOrderPropagatesSizingSkips(t *testing.T) {
 	b := newRunBudget(1000.0)
-	for _, reason := range []skipReason{skipYesSharesOwned, skipAtOrOverTarget, skipNoTwoSidedBook} {
-		d := sizingDecision{Skip: true, Reason: reason, CommittedNoShares: 0}
+	for _, reason := range []skipReason{skipNoSharesOwned, skipAtOrOverTarget, skipYesTwoSidedBook} {
+		d := sizingDecision{Skip: true, Reason: reason, CommittedShares: 0}
 		res := fundOrder(d, 0.95, 5.0, b)
 		if !res.Skip || res.Reason != reason {
 			t.Errorf("reason %q: want propagated skip, got %+v", reason, res)
@@ -206,7 +206,7 @@ func TestPartialFillLargestAffordable(t *testing.T) {
 	const minOrder = 1.0
 	// Desired 100 shares => desired notional 50. Fund only 30 of budget.
 	b := newRunBudget(30.0)
-	d := sizingDecision{TopupShares: 100, TargetNoShares: 100, CommittedNoShares: 0}
+	d := sizingDecision{TopupShares: 100, TargetShares: 100, CommittedShares: 0}
 	res := fundOrder(d, midpoint, minOrder, b)
 
 	if !res.Place || !res.PartialFill {
@@ -235,7 +235,7 @@ func TestPartialFillCappedAtTarget(t *testing.T) {
 	// Budget 30 affords 60 shares, but desired is only 10 => place exactly 10, and
 	// since the full desired notional (5) fits, this is a FULL fund (not partial).
 	b := newRunBudget(30.0)
-	d := sizingDecision{TopupShares: 10, TargetNoShares: 10, CommittedNoShares: 0}
+	d := sizingDecision{TopupShares: 10, TargetShares: 10, CommittedShares: 0}
 	res := fundOrder(d, midpoint, minOrder, b)
 	if !res.Place || res.PartialFill {
 		t.Fatalf("want full (non-partial) place capped at target, got %+v", res)
@@ -253,7 +253,7 @@ func TestPartialFillSkipsBelowMinNotional(t *testing.T) {
 	const minOrder = 10.0
 	minNotional := minOrder * midpoint // 5.0
 	b := newRunBudget(minNotional - 0.5)
-	d := sizingDecision{TopupShares: 100, TargetNoShares: 100, CommittedNoShares: 0}
+	d := sizingDecision{TopupShares: 100, TargetShares: 100, CommittedShares: 0}
 	res := fundOrder(d, midpoint, minOrder, b)
 
 	if !res.Skip || res.Reason != skipBudgetBelowMin {
@@ -297,7 +297,7 @@ func TestRemainingDecrementsAcrossLoop(t *testing.T) {
 		loopMarket("m5", base.Add(5*time.Hour)),
 	}
 	inputs := func(eligibleMarket) fundingInputs {
-		return fundingInputs{Midpoint: 0.50, MinOrderSize: 1.0, Committed: 0, YesOwned: false}
+		return fundingInputs{Midpoint: 0.50, MinOrderSize: 1.0, Committed: 0, OpposingOwned: false}
 	}
 
 	planned := planFundedOrders(logger, cfg, wallet, wallet, markets, inputs)
@@ -364,7 +364,7 @@ func TestBudgetLoopResilienceSkipDoesNotStop(t *testing.T) {
 		case "err":
 			return fundingInputs{Err: errors.New("min order size undeterminable")}
 		case "yes":
-			return fundingInputs{Midpoint: 0.90, MinOrderSize: 1.0, YesOwned: true}
+			return fundingInputs{Midpoint: 0.90, MinOrderSize: 1.0, OpposingOwned: true}
 		default:
 			return fundingInputs{Midpoint: 0.90, MinOrderSize: 1.0}
 		}

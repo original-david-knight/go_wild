@@ -158,7 +158,7 @@ func (s *ActivityStore) LogPlanCreated(ctx context.Context, objectiveID, summary
 	})
 }
 
-func (s *ActivityStore) logTaskStarted(ctx context.Context, objectiveID, summary string) error {
+func (s *ActivityStore) LogTaskStarted(ctx context.Context, objectiveID, summary string) error {
 	return s.LogEvent(ctx, &ActivityEvent{
 		ObjectiveID: objectiveID,
 		EventType:   "task_started",
@@ -167,7 +167,7 @@ func (s *ActivityStore) logTaskStarted(ctx context.Context, objectiveID, summary
 	})
 }
 
-func (s *ActivityStore) logTaskCompleted(ctx context.Context, objectiveID, summary string, details map[string]any) error {
+func (s *ActivityStore) LogTaskCompleted(ctx context.Context, objectiveID, summary string, details map[string]any) error {
 	return s.LogEvent(ctx, &ActivityEvent{
 		ObjectiveID: objectiveID,
 		EventType:   "task_completed",
@@ -196,3 +196,7 @@ func toEvents(results []any) []*ActivityEvent {
 	}
 	return events
 }
+
+// DB exposes the underlying database handle, for the same reason
+// ObjectiveStore.DB does.
+func (a *ActivityStore) DB() gowild_data.Database { return a.db }

@@ -13,7 +13,7 @@ import (
 
 // accountSnapshot is the resolved account value at a point in a run: the
 // spendable USDC cash held in the Polygon wallet, the mark-to-book value of all
-// owned positions, and their sum. Later rungs size NO-buy orders against Total.
+// owned positions, and their sum. Later rungs size YES-buy orders against Total.
 type accountSnapshot struct {
 	WalletUSDC           float64
 	PositionsValue       float64

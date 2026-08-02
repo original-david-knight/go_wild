@@ -157,13 +157,13 @@ func TestDiscover_SortedByCloseAscendingStable(t *testing.T) {
 	}
 }
 
-func TestDiscover_OwnedYesSharesRejected(t *testing.T) {
+func TestDiscover_OwnedNoSharesRejected(t *testing.T) {
 	m := marketWith("0xowned", "noOwned", "yesOwned", 7*24*time.Hour, "10000")
 	fake := &fakeTradingClient{
 		markets: []polymarket.Market{m},
 		books:   map[string]*polymarket.OrderBookDetail{"noOwned": twoSidedBook()},
-		// Account already holds the YES token with a positive size.
-		positions: []polymarket.Position{{Asset: "yesOwned", Size: 5}},
+		// Account already holds the opposing NO token with a positive size.
+		positions: []polymarket.Position{{Asset: "noOwned", Size: 5}},
 	}
 	app := discoverTestApp(fake)
 
@@ -174,16 +174,16 @@ func TestDiscover_OwnedYesSharesRejected(t *testing.T) {
 		t.Fatalf("discoverEligibleMarkets: %v", err)
 	}
 	if len(eligible) != 0 {
-		t.Fatalf("eligible = %+v, want none (YES shares owned)", eligible)
+		t.Fatalf("eligible = %+v, want none (NO shares owned)", eligible)
 	}
 	rejected := false
 	for _, e := range eventsNamed(parseEvents(t, buf.String()), "market_eligibility") {
-		if e["condition_id"] == "0xowned" && e["reason"] == skipYesSharesOwned.String() {
+		if e["condition_id"] == "0xowned" && e["reason"] == skipNoSharesOwned.String() {
 			rejected = true
 		}
 	}
 	if !rejected {
-		t.Errorf("expected 0xowned rejected for %q", skipYesSharesOwned)
+		t.Errorf("expected 0xowned rejected for %q", skipNoSharesOwned)
 	}
 }
 

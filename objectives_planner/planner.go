@@ -1,4 +1,4 @@
-package objectives
+package objectives_planner
 
 import (
 	"context"
@@ -128,9 +128,9 @@ func (p *StrategicPlanner) plan(ctx context.Context, prompt string, validToolNam
 func parsePlanResponse(text string) (*PlanOutput, *agentnode.NodeGraph, error) {
 	var raw struct {
 		Reasoning           string               `json:"reasoning"`
-		Mutations           []TreeMutation        `json:"mutations"`
-		ExecutionNodes      []json.RawMessage     `json:"execution_nodes"`
-		ClarifyingQuestions []ClarifyingQuestion   `json:"clarifying_questions"`
+		Mutations           []TreeMutation       `json:"mutations"`
+		ExecutionNodes      []json.RawMessage    `json:"execution_nodes"`
+		ClarifyingQuestions []ClarifyingQuestion `json:"clarifying_questions"`
 	}
 	if err := json.Unmarshal([]byte(text), &raw); err != nil {
 		return nil, nil, fmt.Errorf("planner returned invalid JSON: %w", err)

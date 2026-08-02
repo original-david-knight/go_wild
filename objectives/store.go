@@ -184,8 +184,8 @@ func (s *ObjectiveStore) GetRoots(ctx context.Context) ([]*Objective, error) {
 	return toObjectives(results), nil
 }
 
-// getByStatus returns all objectives with the given status.
-func (s *ObjectiveStore) getByStatus(ctx context.Context, status ObjectiveStatus) ([]*Objective, error) {
+// GetByStatus returns all objectives with the given status.
+func (s *ObjectiveStore) GetByStatus(ctx context.Context, status ObjectiveStatus) ([]*Objective, error) {
 	where := s.addCompanyScope(map[string]any{"status": string(status)})
 	results, err := s.db.Table(Objective{}).Query(ctx, gowild_data.QueryOpts{
 		Where: where,
@@ -509,3 +509,23 @@ func isUUID(s string) bool {
 	_, err := uuid.Parse(s)
 	return err == nil
 }
+
+// GetByScheduleType returns all objectives with the given schedule type.
+func (s *ObjectiveStore) GetByScheduleType(ctx context.Context, schedType ScheduleType) ([]*Objective, error) {
+	where := map[string]any{"schedule_type": string(schedType)}
+	if s.companyID != "" {
+		where["company_id"] = s.companyID
+	}
+	results, err := s.db.Table(Objective{}).Query(ctx, gowild_data.QueryOpts{
+		Where: where,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get by schedule type %s: %w", schedType, err)
+	}
+	return toObjectives(results), nil
+}
+
+// DB exposes the underlying database handle. The scheduler in
+// objectives_planner queries escalations directly; before the module split
+// that was a private field access inside the package.
+func (s *ObjectiveStore) DB() gowild_data.Database { return s.db }

@@ -34,7 +34,7 @@ func TestStaleCancel_PricesEqualIntegerTickRobust(t *testing.T) {
 }
 
 // TestStaleCancel_UnknownTickKeepsNotDedup verifies fail-closed behavior: when the
-// venue tick is unknown, two same-market NO-buy orders at different prices (both
+// venue tick is unknown, two same-market YES-buy orders at different prices (both
 // with the correct expiration) are KEPT, not canceled as duplicates, because their
 // price staleness cannot be proven.
 func TestStaleCancel_UnknownTickKeepsNotDedup(t *testing.T) {
@@ -46,9 +46,9 @@ func TestStaleCancel_UnknownTickKeepsNotDedup(t *testing.T) {
 	expiry := closeAt.Add(-24 * time.Hour).Unix()
 	expStr := strconv.FormatInt(expiry, 10)
 
-	// Two-sided book (so a midpoint exists / market is eligible) but NO tick size.
-	book := &polymarket.OrderBookDetail{
-		AssetID: noToken,
+	// Two-sided YES book but no execution tick size.
+	yesBook := &polymarket.OrderBookDetail{
+		AssetID: yesToken,
 		Bids:    []polymarket.OrderBookEntry{{Price: "0.90", Size: "100"}},
 		Asks:    []polymarket.OrderBookEntry{{Price: "0.92", Size: "100"}},
 	}
@@ -65,11 +65,14 @@ func TestStaleCancel_UnknownTickKeepsNotDedup(t *testing.T) {
 
 	fake := &fakeTradingClient{
 		openOrders: []polymarket.Order{
-			{ID: "o1", Market: conditionID, AssetID: noToken, Side: "BUY", Price: "0.91", Expiration: expStr, OriginalSize: "10"},
-			{ID: "o2", Market: conditionID, AssetID: noToken, Side: "BUY", Price: "0.88", Expiration: expStr, OriginalSize: "10"},
+			{ID: "o1", Market: conditionID, AssetID: yesToken, Side: "BUY", Price: "0.91", Expiration: expStr, OriginalSize: "10"},
+			{ID: "o2", Market: conditionID, AssetID: yesToken, Side: "BUY", Price: "0.88", Expiration: expStr, OriginalSize: "10"},
 		},
 		gammaMarkets: map[string]*polymarket.Market{conditionID: market},
-		books:        map[string]*polymarket.OrderBookDetail{noToken: book},
+		books: map[string]*polymarket.OrderBookDetail{
+			noToken:  reconcileBook("0.93", "0.95", 5),
+			yesToken: yesBook,
+		},
 	}
 
 	cfg := defaultConfig()

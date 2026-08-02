@@ -15,6 +15,7 @@ import (
 // reconcileTestApp wires an App to the fake at the fixed eligibility run time so
 // close-time arithmetic lines up with the markets built via marketWith(...).
 func reconcileTestApp(fake *fakeTradingClient, dryRun bool) *App {
+	ensureYesBooks(fake)
 	cfg := defaultConfig()
 	cfg.DryRun = dryRun
 	return &App{
@@ -99,6 +100,53 @@ func TestReconcileFreshRecheckEarliestCloseFirst(t *testing.T) {
 	}
 }
 
+// TestReconcilePlacesYesUsingYesBook pins the reversal itself: the NO book remains
+// the qualification signal, while token selection, execution price, and sizing all
+// come from the distinct YES book.
+func TestReconcilePlacesYesUsingYesBook(t *testing.T) {
+	m := reconcileEligible("0xreverse", "noReverse", "yesReverse", 7*24*time.Hour, 0.94)
+	fake := &fakeTradingClient{
+		books: map[string]*polymarket.OrderBookDetail{
+			"noReverse":  reconcileBook("0.93", "0.95", 5),
+			"yesReverse": reconcileBook("0.04", "0.06", 5),
+		},
+		positions: []polymarket.Position{{Asset: "yesReverse", Size: 50}},
+	}
+	app := reconcileTestApp(fake, false)
+
+	var buf bytes.Buffer
+	app.reconcilePass(
+		context.Background(),
+		NewLogger(&buf, "run_reverse"),
+		snapWith(1_000, 1_000),
+		[]eligibleMarket{m},
+	)
+
+	if len(fake.placedOrders) != 1 {
+		t.Fatalf("placed %d orders, want exactly one YES buy", len(fake.placedOrders))
+	}
+	placed := fake.placedOrders[0]
+	if placed.tokenID != "yesReverse" || placed.side != polymarket.Buy {
+		t.Fatalf("placed token/side = %q/%q, want yesReverse/BUY", placed.tokenID, placed.side)
+	}
+	if absDiff(placed.price, 0.05) > 1e-9 {
+		t.Errorf("placed price = %v, want YES midpoint 0.05", placed.price)
+	}
+	wantShares := floorToSizePrecision((1_000*defaultTargetExposurePct)/0.05 - 50)
+	if absDiff(placed.size, wantShares) > 1e-9 {
+		t.Errorf("placed size = %v, want %v from YES midpoint", placed.size, wantShares)
+	}
+
+	orders := eventsNamed(parseEvents(t, buf.String()), "reconcile_order")
+	if len(orders) != 1 {
+		t.Fatalf("reconcile_order events = %v, want one", orders)
+	}
+	if orders[0]["no_signal_midpoint"] != 0.94 || orders[0]["yes_midpoint"] != 0.05 {
+		t.Errorf("signal/execution midpoint fields = %v/%v, want 0.94/0.05",
+			orders[0]["no_signal_midpoint"], orders[0]["yes_midpoint"])
+	}
+}
+
 // TestReconcileFreshMidpointOutOfBandPlacesNothing verifies a market that passed
 // discovery but whose RE-CHECKED midpoint has fallen to <= MinNoMidpoint places no
 // order (the fresh eligibility re-check rejects it).
@@ -150,7 +198,7 @@ func TestReconcileMaintainsMatchingOrder(t *testing.T) {
 	existing := polymarket.Order{
 		ID:           "ord-match",
 		Market:       "0xmatch",
-		AssetID:      "noMatch",
+		AssetID:      "yesMatch",
 		Side:         "BUY",
 		Price:        "0.94",
 		OriginalSize: strconv.FormatFloat(floorToSizePrecision(wantShares), 'f', 2, 64),
@@ -219,7 +267,7 @@ func TestReconcileCancelReplaceOnDivergence(t *testing.T) {
 			o := polymarket.Order{
 				ID:           "ord-div",
 				Market:       "0xdiv",
-				AssetID:      "noDiv",
+				AssetID:      "yesDiv",
 				Side:         "BUY",
 				Price:        "0.94",
 				OriginalSize: strconv.FormatFloat(floorToSizePrecision(wantShares), 'f', 2, 64),
@@ -238,12 +286,12 @@ func TestReconcileCancelReplaceOnDivergence(t *testing.T) {
 			logger := NewLogger(&buf, "run_div")
 			app.reconcilePass(context.Background(), logger, snapWith(10_000, 10_000), []eligibleMarket{m})
 
-			// A SELL order is not a NO-buy candidate, so it is NOT canceled; the pass
+			// A SELL order is not a YES-buy candidate, so it is NOT canceled; the pass
 			// simply places the (missing) desired order. Every other divergence cancels
-			// the one NO-buy order and replaces it.
+			// the one YES-buy order and replaces it.
 			if c.name == "side diverges" {
 				if len(fake.canceledOrders) != 0 {
-					t.Fatalf("side divergence canceled %v, want 0 (SELL is not a NO-buy)", fake.canceledOrders)
+					t.Fatalf("side divergence canceled %v, want 0 (SELL is not a YES-buy)", fake.canceledOrders)
 				}
 			} else {
 				if len(fake.canceledOrders) != 1 || fake.canceledOrders[0] != "ord-div" {
@@ -254,8 +302,8 @@ func TestReconcileCancelReplaceOnDivergence(t *testing.T) {
 				t.Fatalf("placed %d orders, want exactly 1", len(fake.placedOrders))
 			}
 			placed := fake.placedOrders[0]
-			if placed.tokenID != "noDiv" || placed.side != polymarket.Buy {
-				t.Errorf("placed token/side = %q/%q, want noDiv/BUY", placed.tokenID, placed.side)
+			if placed.tokenID != "yesDiv" || placed.side != polymarket.Buy {
+				t.Errorf("placed token/side = %q/%q, want yesDiv/BUY", placed.tokenID, placed.side)
 			}
 			// Replacement price == normalized midpoint (0.94 on the 0.01 tick).
 			if absDiff(placed.price, 0.94) > 1e-9 {
@@ -339,7 +387,7 @@ func TestReconcileDryRunLogsButSubmitsNothing(t *testing.T) {
 	// A diverging existing order so the decision is a cancel-replace (exercises both
 	// the cancel and place log paths under dry-run).
 	o := polymarket.Order{
-		ID: "ord-dry", Market: "0xdry", AssetID: "noDry", Side: "BUY",
+		ID: "ord-dry", Market: "0xdry", AssetID: "yesDry", Side: "BUY",
 		Price: "0.90", OriginalSize: "1.00", SizeMatched: "0",
 		Expiration: strconv.FormatInt(reconcileExpiry(closeIn), 10),
 	}
@@ -370,7 +418,7 @@ func TestReconcileDryRunLogsButSubmitsNothing(t *testing.T) {
 	if wouldPlace == nil {
 		t.Fatalf("expected a would_place reconcile_order for 0xdry")
 	}
-	for _, field := range []string{"question", "no_token_id", "midpoint", "shares", "notional", "close_at", "expiration", "run_usdc_remaining", "min_order_exception", "partial_fill"} {
+	for _, field := range []string{"question", "yes_token_id", "no_signal_midpoint", "yes_midpoint", "shares", "notional", "close_at", "expiration", "run_usdc_remaining", "min_order_exception", "partial_fill"} {
 		if _, ok := wouldPlace[field]; !ok {
 			t.Errorf("would_place missing detail field %q; got %v", field, wouldPlace)
 		}
@@ -406,7 +454,7 @@ func TestReconcileIdempotency(t *testing.T) {
 	}
 
 	// Feed the placed order back as an open order, exactly as the venue would report
-	// it (BUY on the NO token, at the placed price, full size, the placed expiration).
+	// it (BUY on the YES token, at the placed price, full size, the placed expiration).
 	// The fake already records placed.size on the venue's FLOOR grid, so it carries no
 	// sub-cent precision — format it straight to 2 decimals.
 	placed := fake.placedOrders[0]

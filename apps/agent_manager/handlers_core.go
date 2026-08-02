@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/original-david-knight/go_wild/apps/agent_manager/dockermgr"
 	"github.com/original-david-knight/go_wild/agent_net"
+	"github.com/original-david-knight/go_wild/apps/agent_manager/dockermgr"
 	"github.com/original-david-knight/go_wild/data"
 )
 

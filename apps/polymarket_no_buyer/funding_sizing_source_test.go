@@ -22,7 +22,7 @@ func TestBudgetSizesTotalBudgetsWallet(t *testing.T) {
 	const wallet = 100.0
 	market := loopMarket("m1", time.Unix(0, 0).UTC())
 	inputs := func(eligibleMarket) fundingInputs {
-		return fundingInputs{Midpoint: 0.50, MinOrderSize: 1.0, Committed: 0, YesOwned: false}
+		return fundingInputs{Midpoint: 0.50, MinOrderSize: 1.0, Committed: 0, OpposingOwned: false}
 	}
 
 	planned := planFundedOrders(logger, &cfg, total, wallet, []eligibleMarket{market}, inputs)

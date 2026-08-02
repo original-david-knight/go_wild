@@ -152,7 +152,7 @@ func TestObjectiveStore_GetByStatus(t *testing.T) {
 	active.Status = StatusActive
 	store.Update(ctx, active)
 
-	pending, err := store.getByStatus(ctx, StatusPending)
+	pending, err := store.GetByStatus(ctx, StatusPending)
 	if err != nil {
 		t.Fatalf("get by status: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestObjectiveStore_GetByStatus(t *testing.T) {
 		t.Fatalf("expected 2 pending, got %d", len(pending))
 	}
 
-	actives, err := store.getByStatus(ctx, StatusActive)
+	actives, err := store.GetByStatus(ctx, StatusActive)
 	if err != nil {
 		t.Fatalf("get active: %v", err)
 	}
@@ -281,31 +281,6 @@ func TestObjectiveStore_CreateInheritsToolAllowlist(t *testing.T) {
 	}
 }
 
-func TestExecutionEngine_ResolveTools_EnforcesAllowlist(t *testing.T) {
-	engine := NewExecutionEngine(Config{}, nil)
-	all := engine.resolveTools(&Objective{})
-	if len(all) == 0 {
-		t.Fatal("expected at least one base tool")
-	}
-
-	var allowed string
-	for name := range all {
-		allowed = name
-		break
-	}
-
-	filtered := engine.resolveTools(&Objective{
-		ToolAllowlist: []string{allowed, "missing_tool"},
-	})
-
-	if len(filtered) != 1 {
-		t.Fatalf("expected exactly one allowed tool, got %d", len(filtered))
-	}
-	if _, ok := filtered[allowed]; !ok {
-		t.Fatalf("expected allowed tool %q to be present", allowed)
-	}
-}
-
 func TestActivityStore(t *testing.T) {
 	db := setupTestDB(t)
 	activity := NewActivityStore(db, "")
@@ -315,8 +290,8 @@ func TestActivityStore(t *testing.T) {
 
 	// Log some events
 	activity.LogPlanCreated(ctx, objID, "Created plan", map[string]any{"tasks": 3})
-	activity.logTaskStarted(ctx, objID, "Starting task 1")
-	activity.logTaskCompleted(ctx, objID, "Task 1 done", nil)
+	activity.LogTaskStarted(ctx, objID, "Starting task 1")
+	activity.LogTaskCompleted(ctx, objID, "Task 1 done", nil)
 	activity.LogTaskFailed(ctx, objID, "Task 2 failed", map[string]any{"error": "timeout"})
 
 	// Get events for objective
@@ -448,10 +423,10 @@ func TestActivityStore_CompanyScopeIsolation(t *testing.T) {
 	activityA := NewActivityStore(db, "company-a")
 	activityB := NewActivityStore(db, "company-b")
 
-	if err := activityA.logTaskStarted(ctx, objA.ID, "start a"); err != nil {
+	if err := activityA.LogTaskStarted(ctx, objA.ID, "start a"); err != nil {
 		t.Fatalf("log activity for own company objective: %v", err)
 	}
-	if err := activityA.logTaskStarted(ctx, objB.ID, "start b from a"); err == nil {
+	if err := activityA.LogTaskStarted(ctx, objB.ID, "start b from a"); err == nil {
 		t.Fatal("expected cross-company activity write to be rejected")
 	}
 
@@ -459,7 +434,7 @@ func TestActivityStore_CompanyScopeIsolation(t *testing.T) {
 		t.Fatal("expected cross-company activity read to be rejected")
 	}
 
-	if err := activityB.logTaskStarted(ctx, objB.ID, "start b"); err != nil {
+	if err := activityB.LogTaskStarted(ctx, objB.ID, "start b"); err != nil {
 		t.Fatalf("log activity for company-b objective: %v", err)
 	}
 	if _, err := activityB.GetEvents(ctx, objB.ID, 10); err != nil {

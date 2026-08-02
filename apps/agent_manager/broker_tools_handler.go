@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"strings"
 
-	"google.golang.org/genai"
 	"github.com/original-david-knight/go_wild/agent_data"
 	gowild_data "github.com/original-david-knight/go_wild/data"
+	"google.golang.org/genai"
 )
 
 // BrokerToolsHandler handles the generic tool proxy endpoint.

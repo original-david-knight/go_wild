@@ -11,7 +11,7 @@ import (
 // USDC budget cannot cover even the venue minimum order notional for that market.
 const (
 	// The remaining per-run USDC budget cannot fund the market's minimum order
-	// notional (minOrderSize * NO midpoint), so no order is placed. Distinct from
+	// notional (minOrderSize * YES midpoint), so no order is placed. Distinct from
 	// the sizing reason topup_below_min (the desired top-up itself is below the
 	// venue minimum) — here the desired order is large enough but the run has run
 	// out of spendable wallet USDC.
@@ -20,7 +20,7 @@ const (
 
 // runBudget is the per-run USDC ledger. It starts equal to the snapshot
 // WalletUSDC (the Polygon wallet collateral — never an exchange/CLOB balance) and
-// is decremented by the notional (shares × NO midpoint) of every order the run
+// is decremented by the notional (shares × YES midpoint) of every order the run
 // places or intentionally leaves open, so total planned new/maintained notional
 // across ALL markets never exceeds the wallet balance. There is no portfolio-wide
 // hard cap beyond this single shared budget.
@@ -63,7 +63,7 @@ type fundingResult struct {
 }
 
 // planFunding is the PURE per-market funding decision given a sizing decision, the
-// NO midpoint, the venue minimum order size, and the budget still REMAINING this
+// YES midpoint, the venue minimum order size, and the budget still REMAINING this
 // run. It performs no I/O, consults no clock, uses no randomness, and — unlike
 // fundOrder — does NOT mutate any budget: it reads `remaining` and returns the
 // intended outcome only. The caller reserves the returned Notional itself, exactly
@@ -76,7 +76,7 @@ type fundingResult struct {
 //     committed == 0. Bump the order up to exactly minOrderSize. Place it
 //     (MinOrderException=true) when `remaining` covers the minimum notional; else
 //     skip budget_below_min.
-//  2. Any other sizing skip (existing-position topup_below_min, yes_owned,
+//  2. Any other sizing skip (existing-position topup_below_min, no_owned,
 //     at_or_over_target, etc.): propagate the skip with d.Reason, fund nothing.
 //  3. Fundable top-up (d.TopupShares >= minOrderSize):
 //     a. `remaining` covers the full desired notional => place the full desired top-up.
@@ -88,10 +88,10 @@ func planFunding(d sizingDecision, midpoint, minOrderSize, remaining float64) fu
 	minNotional := minOrderSize * midpoint
 
 	if d.Skip {
-		// 1. NEW-position minimum-order exception: a brand-new NO position
+		// 1. NEW-position minimum-order exception: a brand-new YES position
 		// (committed == 0) whose 1% target order fell below the venue minimum is
 		// bumped UP TO the minimum, budget permitting.
-		if d.Reason == skipTopupBelowMin && d.CommittedNoShares == 0 {
+		if d.Reason == skipTopupBelowMin && d.CommittedShares == 0 {
 			if remaining >= minNotional {
 				return fundingResult{
 					Place:             true,
@@ -104,7 +104,7 @@ func planFunding(d sizingDecision, midpoint, minOrderSize, remaining float64) fu
 		}
 
 		// 2. Every other sizing skip propagates unchanged: an EXISTING position's
-		// below-min top-up, yes_owned, at_or_over_target, etc. Fund nothing.
+		// below-min top-up, no_owned, at_or_over_target, etc. Fund nothing.
 		return fundingResult{Skip: true, Reason: d.Reason}
 	}
 
@@ -149,20 +149,20 @@ func fundOrder(d sizingDecision, midpoint, minOrderSize float64, budget *runBudg
 }
 
 // fundingInputs are the per-market inputs the planning loop needs once a market is
-// known to be eligible: the NO midpoint used to price shares, the resolved venue
-// minimum order size, the already-committed NO exposure, and whether the account
-// owns YES shares for the market. A non-nil Err marks a market whose inputs could
+// known to be eligible: the YES midpoint used to price shares, the resolved venue
+// minimum order size, the already-committed YES exposure, and whether the account
+// owns NO shares for the market. A non-nil Err marks a market whose inputs could
 // not be resolved; the loop logs it and continues to the next market (one bad
 // market never stops the rest).
 type fundingInputs struct {
-	Midpoint     float64
-	MinOrderSize float64
-	Committed    float64
-	YesOwned     bool
-	Err          error
+	Midpoint      float64
+	MinOrderSize  float64
+	Committed     float64
+	OpposingOwned bool
+	Err           error
 }
 
-// plannedOrder is a single funded NO-buy intent collected by the planning loop: the
+// plannedOrder is a single funded YES-buy intent collected by the planning loop: the
 // market it targets plus the resolved funding result. The loop is non-mutating, so a
 // plannedOrder records intent only — placement/cancellation is a later rung.
 type plannedOrder struct {
@@ -209,7 +209,7 @@ func planFundedOrders(
 		}
 
 		// Sizing targets total account value; the budget gates against wallet USDC.
-		d := sizeMarket(totalAccountValue, in.Midpoint, in.MinOrderSize, in.Committed, in.YesOwned, cfg)
+		d := sizeMarket(totalAccountValue, in.Midpoint, in.MinOrderSize, in.Committed, in.OpposingOwned, cfg)
 		res := fundOrder(d, in.Midpoint, in.MinOrderSize, budget)
 		logFundingDecision(logger, m, res, budget, nil)
 		if res.Place {
@@ -232,7 +232,7 @@ func planFundedOrders(
 func logFundingDecision(logger *Logger, m eligibleMarket, res fundingResult, budget *runBudget, inputErr error) {
 	fields := map[string]any{
 		"condition_id":     m.Market.ConditionID,
-		"no_token_id":      m.Tokens.NoTokenID,
+		"yes_token_id":     m.Tokens.YesTokenID,
 		"close_at":         m.CloseAt.Format(time.RFC3339),
 		"budget_remaining": budget.Remaining(),
 	}

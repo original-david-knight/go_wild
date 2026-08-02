@@ -28,6 +28,10 @@ const (
 	// NO order-book / midpoint skip.
 	skipNoTwoSidedBook skipReason = "no usable two-sided NO order book"
 
+	// YES order-book / midpoint skip. The NO book remains the strategy signal,
+	// while the reversed strategy prices and submits orders on the YES book.
+	skipYesTwoSidedBook skipReason = "no usable two-sided YES order book"
+
 	// Minimum order size resolution skip: the venue minimum could not be
 	// determined from the order book or clob-market metadata, and no test-only
 	// fallback was configured. The market is excluded from live ordering.
@@ -48,24 +52,24 @@ const (
 	// alongside this so the specific market fault is preserved.
 	cancelMarketIneligible cancelReason = "market_ineligible"
 
-	// The account owns YES shares for the order's market, so any NO order on it is
+	// The account owns NO shares for the order's market, so a YES order on it is
 	// no longer part of the strategy.
-	cancelYesSharesOwned cancelReason = "yes_shares_owned"
+	cancelNoSharesOwned cancelReason = "no_shares_owned"
 
-	// The order is not a NO buy: wrong side (Side != "BUY").
+	// The order is not a YES buy: wrong side (Side != "BUY").
 	cancelWrongSide cancelReason = "wrong_side"
 
-	// The order is on the wrong asset: AssetID is not the market's NO token ID.
+	// The order is on the wrong asset: AssetID is not the market's YES token ID.
 	cancelWrongAsset cancelReason = "wrong_asset"
 
-	// The NO buy order's normalized limit price differs from the normalized latest
-	// NO midpoint price.
+	// The YES buy order's normalized limit price differs from the normalized latest
+	// YES midpoint price.
 	cancelPriceMismatch cancelReason = "price_mismatch"
 
-	// The NO buy order's expiration differs from close_time - OrderExpiryBeforeClose.
+	// The YES buy order's expiration differs from close_time - OrderExpiryBeforeClose.
 	cancelExpirationMismatch cancelReason = "expiration_mismatch"
 
-	// A duplicate/conflicting matching NO buy order for the same market: at most one
+	// A duplicate/conflicting matching YES buy order for the same market: at most one
 	// candidate is kept for the reconciliation pass; the rest are canceled.
 	cancelDuplicateOrder cancelReason = "duplicate_order"
 )

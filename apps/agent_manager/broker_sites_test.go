@@ -10,14 +10,14 @@ func TestSiteSlugValidation(t *testing.T) {
 		valid bool
 	}{
 		{"my-site", true},
-		{"a", false},    // too short (min 3)
-		{"ab", false},   // too short
-		{"abc", true},   // exactly 3
-		{"-abc", false}, // starts with hyphen
-		{"abc-", false}, // ends with hyphen
-		{"ABC", false},  // uppercase
+		{"a", false},       // too short (min 3)
+		{"ab", false},      // too short
+		{"abc", true},      // exactly 3
+		{"-abc", false},    // starts with hyphen
+		{"abc-", false},    // ends with hyphen
+		{"ABC", false},     // uppercase
 		{"my site", false}, // space
-		{"api", true},  // passes regex but is reserved
+		{"api", true},      // passes regex but is reserved
 	}
 	for _, tt := range tests {
 		if siteSlugRegex.MatchString(tt.slug) != tt.valid {

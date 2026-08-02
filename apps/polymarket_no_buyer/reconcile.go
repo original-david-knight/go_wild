@@ -10,12 +10,12 @@ import (
 )
 
 // reconcilePass is the run's final trading step: it drives every eligible market
-// toward its desired steady state — exactly ONE open NO buy order priced at the
-// normalized NO midpoint, expiring OrderExpiryBeforeClose before close, sized to
-// bring held NO shares up to the per-market 1% target. It runs after the snapshot
+// toward its desired steady state — exactly ONE open YES buy order priced at the
+// normalized YES midpoint, expiring OrderExpiryBeforeClose before close, sized to
+// bring held YES shares up to the per-market 1% target. It runs after the snapshot
 // and discovery passes.
 //
-// The model is idempotency-critical. Per-market sizing uses committed = held NO
+// The model is idempotency-critical. Per-market sizing uses committed = held YES
 // shares ONLY (never held + open orders): the very order being reconciled is what
 // provides the rest, so once a right-sized order exists the next run reproduces the
 // same desired order and leaves it untouched. This converges rather than oscillating
@@ -24,9 +24,9 @@ import (
 // The shared run budget is seeded from snapshot.WalletUSDC (the spendable Polygon
 // collateral — never an exchange/CLOB balance); per-market sizing targets
 // snapshot.Total (wallet USDC plus owned-share value). Open orders and positions are
-// fetched once up front; the NO book, midpoint, eligibility, and venue minimum are
-// re-checked FRESH immediately before acting on each market, so a market that drifted
-// out of band since discovery places nothing.
+// fetched once up front. The NO book is re-checked FRESH as the unchanged strategy
+// signal, then the YES book supplies the execution midpoint, venue tick, and minimum.
+// A market whose NO signal drifted out of band since discovery places nothing.
 //
 // Each market is processed independently: a fetch/eligibility/min-order/place/cancel
 // error for one market is logged and the pass continues to the next — one bad market
@@ -47,9 +47,9 @@ func (a *App) reconcilePass(ctx context.Context, logger *Logger, snapshot accoun
 		return
 	}
 
-	// Group every NO-buy candidate order by its market so each market's existing
+	// Group every YES-buy candidate order by its market so each market's existing
 	// orders are located once. The per-market candidate set is filtered to the
-	// market's NO token (side + asset) inside reconcileMarket.
+	// market's YES token (side + asset) inside reconcileMarket.
 	ordersByMarket := map[string][]polymarket.Order{}
 	for _, o := range orders {
 		ordersByMarket[o.Market] = append(ordersByMarket[o.Market], o)
@@ -76,11 +76,11 @@ func (a *App) reconcilePass(ctx context.Context, logger *Logger, snapshot accoun
 }
 
 // reconcileMarket drives a single eligible market toward its desired order. It
-// re-fetches the NO book FRESH, recomputes the midpoint and reads the venue tick,
-// re-runs the FULL eligibility predicate against the fresh midpoint, resolves the
-// venue minimum order size, sizes against the snapshot Total (committed = held NO
-// shares only), and plans funding against the budget's remaining balance WITHOUT
-// reserving. It then either skips (cancelling any existing NO-buy orders), maintains
+// re-fetches the NO signal book FRESH and re-runs the full eligibility predicate,
+// then fetches the YES execution book and reads its midpoint, venue tick, and minimum
+// order size. It sizes against the snapshot Total (committed = held YES shares only)
+// and plans funding against the budget's remaining balance WITHOUT reserving. It
+// then either skips (cancelling any existing YES-buy orders), maintains
 // an already-correct order (reserving its notional and cancelling extras), or
 // cancel-replaces on divergence (cancel all existing, then place). Every fetch/place/
 // cancel error is logged and isolated to this market.
@@ -95,90 +95,114 @@ func (a *App) reconcileMarket(
 	marketOrders []polymarket.Order,
 ) {
 	conditionID := m.Market.ConditionID
-	noToken := m.Tokens.NoTokenID
+	noSignalToken := m.Tokens.NoTokenID
+	yesToken := m.Tokens.YesTokenID
 
-	// 1. Re-fetch the NO order book and recompute the midpoint + venue tick FRESH,
+	// 1. Re-fetch the NO order book and recompute the strategy signal FRESH,
 	// immediately before acting. A book fetch error skips this market only.
-	book, err := a.trading.GetOrderBookDetailed(ctx, noToken)
+	noBook, err := a.trading.GetOrderBookDetailed(ctx, noSignalToken)
 	if err != nil {
 		logger.Event("reconcile_skip", map[string]any{
-			"condition_id": conditionID,
-			"no_token_id":  noToken,
-			"stage":        "get_book",
-			"reason":       skipNoTwoSidedBook.String(),
-			"error":        err.Error(),
+			"condition_id":       conditionID,
+			"no_signal_token_id": noSignalToken,
+			"stage":              "get_book",
+			"reason":             skipNoTwoSidedBook.String(),
+			"error":              err.Error(),
 		})
 		return
 	}
-	mid, midReason := computeNoMidpoint(book)
-	haveMidpoint := midReason == ""
-
-	var tickSize float64
-	haveTick := false
-	if v := float64(book.TickSize); v > 0 {
-		tickSize = v
-		haveTick = true
-	}
+	noMid, noMidReason := computeNoMidpoint(noBook)
+	haveNoMidpoint := noMidReason == ""
 
 	// 2. Re-run the FULL eligibility check against the FRESH midpoint. A market that
 	// drifted out of band (midpoint <= MinNoMidpoint or > MaxNoMidpoint, etc.) since
 	// discovery places nothing — log the deciding reason and skip ordering.
-	if reason := isMarketEligible(m.Market, a.now(), a.cfg, owned, m.Tokens, "", mid, haveMidpoint); reason != "" {
+	if reason := isMarketEligible(m.Market, a.now(), a.cfg, owned, m.Tokens, "", noMid, haveNoMidpoint); reason != "" {
 		logger.Event("reconcile_skip", map[string]any{
-			"condition_id": conditionID,
-			"no_token_id":  noToken,
-			"stage":        "eligibility",
-			"reason":       reason.String(),
+			"condition_id":       conditionID,
+			"no_signal_token_id": noSignalToken,
+			"stage":              "eligibility",
+			"reason":             reason.String(),
 		})
 		return
 	}
 
-	// 3. Resolve the venue minimum order size from the fresh book. Undeterminable
-	// skips this market.
-	minOrderSize, _, minReason := a.resolveMinOrderSize(ctx, logger, conditionID, book)
+	// 3. Fetch the YES execution book. The reversal keeps the NO qualification
+	// signal but must price and submit the actual order on the YES token.
+	yesBook, err := a.trading.GetOrderBookDetailed(ctx, yesToken)
+	if err != nil {
+		logger.Event("reconcile_skip", map[string]any{
+			"condition_id": conditionID,
+			"yes_token_id": yesToken,
+			"stage":        "get_yes_book",
+			"reason":       skipYesTwoSidedBook.String(),
+			"error":        err.Error(),
+		})
+		return
+	}
+	yesMid, yesMidReason := computeYesMidpoint(yesBook)
+	if yesMidReason != "" {
+		logger.Event("reconcile_skip", map[string]any{
+			"condition_id": conditionID,
+			"yes_token_id": yesToken,
+			"stage":        "yes_midpoint",
+			"reason":       yesMidReason.String(),
+		})
+		return
+	}
+
+	var tickSize float64
+	haveTick := false
+	if v := float64(yesBook.TickSize); v > 0 {
+		tickSize = v
+		haveTick = true
+	}
+
+	// 4. Resolve the venue minimum order size from the fresh YES book.
+	minOrderSize, _, minReason := a.resolveMinOrderSize(ctx, logger, conditionID, yesBook)
 	if minReason != "" {
 		logger.Event("reconcile_skip", map[string]any{
 			"condition_id": conditionID,
-			"no_token_id":  noToken,
+			"yes_token_id": yesToken,
 			"stage":        "min_order_size",
 			"reason":       minReason.String(),
 		})
 		return
 	}
 
-	// 4. Size against the snapshot Total. committed = held NO shares ONLY (the order
-	// being reconciled provides the rest); eligible markets never own YES.
-	held := heldNoShares(positions, noToken)
-	decision := sizeMarket(snapshot.Total, mid.Midpoint, minOrderSize, held, false, a.cfg)
+	// 5. Size against the snapshot Total. committed = held YES shares ONLY (the
+	// order being reconciled provides the rest); eligible markets never own NO.
+	held := heldOutcomeShares(positions, yesToken)
+	decision := sizeMarket(snapshot.Total, yesMid.Midpoint, minOrderSize, held, owned[noSignalToken], a.cfg)
 
-	// 5. Plan funding against the budget's remaining balance WITHOUT reserving. The
+	// 6. Plan funding against the budget's remaining balance WITHOUT reserving. The
 	// reservation happens once on the maintain/place branch only.
-	plan := planFunding(decision, mid.Midpoint, minOrderSize, budget.Remaining())
+	plan := planFunding(decision, yesMid.Midpoint, minOrderSize, budget.Remaining())
 
-	// 6. Desired price and GTD expiration. Without a known tick the price is not on a
+	// 7. Desired price and GTD expiration. Without a known tick the price is not on a
 	// provable grid, so skip ordering rather than place on an unknown grid.
 	if !haveTick {
 		logger.Event("reconcile_skip", map[string]any{
 			"condition_id": conditionID,
-			"no_token_id":  noToken,
+			"yes_token_id": yesToken,
 			"stage":        "tick_size",
 			"reason":       "venue_tick_undeterminable",
 		})
 		return
 	}
-	desiredPrice := normalizePrice(mid.Midpoint, tickSize)
+	desiredPrice := normalizePrice(yesMid.Midpoint, tickSize)
 	desiredExpiry := m.CloseAt.Add(-a.cfg.OrderExpiryBeforeClose).Unix()
 
-	// The market's existing NO-buy orders (right side + right asset). These are the
+	// The market's existing YES-buy orders (right side + right asset). These are the
 	// candidates to maintain, cancel, or replace.
-	existing := existingNoBuyOrders(marketOrders, noToken)
+	existing := existingOutcomeBuyOrders(marketOrders, yesToken)
 
-	// 7. Skip branch: no order is wanted. Cancel every existing NO-buy order (none is
+	// 8. Skip branch: no order is wanted. Cancel every existing YES-buy order (none is
 	// desired) and reserve nothing.
 	if plan.Skip {
 		logger.Event("reconcile_skip", map[string]any{
 			"condition_id": conditionID,
-			"no_token_id":  noToken,
+			"yes_token_id": yesToken,
 			"stage":        "funding",
 			"reason":       plan.Reason.String(),
 		})
@@ -192,7 +216,7 @@ func (a *App) reconcileMarket(
 	if desiredExpiry <= a.now().Unix() {
 		logger.Event("reconcile_skip", map[string]any{
 			"condition_id": conditionID,
-			"no_token_id":  noToken,
+			"yes_token_id": yesToken,
 			"stage":        "expiration",
 			"reason":       "expiration_not_in_future",
 			"expiration":   desiredExpiry,
@@ -217,7 +241,7 @@ func (a *App) reconcileMarket(
 	if desiredShares < minOrderSize {
 		logger.Event("reconcile_skip", map[string]any{
 			"condition_id":   conditionID,
-			"no_token_id":    noToken,
+			"yes_token_id":   yesToken,
 			"stage":          "size_floor",
 			"reason":         "floored_below_min_order_size",
 			"desired_shares": desiredShares,
@@ -230,11 +254,11 @@ func (a *App) reconcileMarket(
 	}
 
 	// Look for an existing order matching the desired order exactly: side BUY,
-	// asset == NO token, on-tick price == desired price, parsed expiration ==
+	// asset == YES token, on-tick price == desired price, parsed expiration ==
 	// desired expiration, and floored remaining size == floored desired size.
 	matchIdx := -1
 	for i, o := range existing {
-		if orderMatchesDesired(o, noToken, desiredPrice, desiredExpiry, desiredShares, tickSize) {
+		if orderMatchesDesired(o, yesToken, desiredPrice, desiredExpiry, desiredShares, tickSize) {
 			matchIdx = i
 			break
 		}
@@ -242,10 +266,10 @@ func (a *App) reconcileMarket(
 
 	if matchIdx >= 0 {
 		// Maintain the matching order: reserve its notional (intentionally left open),
-		// log it unchanged, and cancel every OTHER existing NO-buy order so exactly one
+		// log it unchanged, and cancel every OTHER existing YES-buy order so exactly one
 		// remains.
 		budget.reserve(plan.Notional)
-		a.logReconcileAction(logger, "maintained", m, noToken, mid.Midpoint, plan, desiredShares, desiredPrice, desiredExpiry, budget)
+		a.logReconcileAction(logger, "maintained", m, yesToken, noMid.Midpoint, yesMid.Midpoint, plan, desiredShares, desiredPrice, desiredExpiry, budget)
 		for i, o := range existing {
 			if i == matchIdx {
 				continue
@@ -255,24 +279,24 @@ func (a *App) reconcileMarket(
 		return
 	}
 
-	// 9. No match: cancel-replace on divergence. Cancel all existing NO-buy orders,
+	// 10. No match: cancel-replace on divergence. Cancel all existing YES-buy orders,
 	// then place a fresh order at the desired price/size/expiration.
 	for _, o := range existing {
 		a.reconcileCancel(ctx, logger, conditionID, o, "diverged")
 	}
-	a.reconcilePlace(ctx, logger, m, noToken, mid.Midpoint, plan, desiredShares, desiredPrice, desiredExpiry, budget)
+	a.reconcilePlace(ctx, logger, m, yesToken, noMid.Midpoint, yesMid.Midpoint, plan, desiredShares, desiredPrice, desiredExpiry, budget)
 }
 
-// existingNoBuyOrders filters a market's orders to its open NO-buy orders: side BUY
-// (case-insensitive) on the market's NO token. These are the only orders the
+// existingOutcomeBuyOrders filters a market's orders to its open YES-buy orders:
+// side BUY (case-insensitive) on the selected token. These are the only orders the
 // reconciliation pass maintains, cancels, or replaces.
-func existingNoBuyOrders(orders []polymarket.Order, noTokenID string) []polymarket.Order {
+func existingOutcomeBuyOrders(orders []polymarket.Order, tokenID string) []polymarket.Order {
 	var out []polymarket.Order
 	for _, o := range orders {
 		if !strings.EqualFold(strings.TrimSpace(o.Side), "BUY") {
 			continue
 		}
-		if o.AssetID != noTokenID {
+		if o.AssetID != tokenID {
 			continue
 		}
 		out = append(out, o)
@@ -281,18 +305,18 @@ func existingNoBuyOrders(orders []polymarket.Order, noTokenID string) []polymark
 }
 
 // orderMatchesDesired reports whether an open order already IS the desired order:
-// BUY side on the NO token, on-tick price equal to the desired price on the venue
+// BUY side on the selected token, on-tick price equal to the desired price on the venue
 // tick, parsed expiration equal to the desired GTD expiration, and the floored
 // remaining size (OriginalSize - SizeMatched) equal to the (already-floored) desired
 // size. Price equality is on the venue tick grid; size equality is on the venue's
 // two-decimal FLOOR grid — desiredShares MUST already be floorToSizePrecision'd by
 // the caller so both sides compare on the grid the venue actually stored; expiration
 // equality is exact unix seconds. A match means the order is left unchanged.
-func orderMatchesDesired(o polymarket.Order, noTokenID string, desiredPrice float64, desiredExpiry int64, desiredShares, tickSize float64) bool {
+func orderMatchesDesired(o polymarket.Order, tokenID string, desiredPrice float64, desiredExpiry int64, desiredShares, tickSize float64) bool {
 	if !strings.EqualFold(strings.TrimSpace(o.Side), "BUY") {
 		return false
 	}
-	if o.AssetID != noTokenID {
+	if o.AssetID != tokenID {
 		return false
 	}
 
@@ -321,7 +345,7 @@ func orderMatchesDesired(o polymarket.Order, noTokenID string, desiredPrice floa
 	return remaining == desiredShares
 }
 
-// reconcilePlace places a fresh NO buy order via PlaceOrderWithExpiration and, on
+// reconcilePlace places a fresh YES buy order via PlaceOrderWithExpiration and, on
 // success, reserves its notional. desiredShares is the venue-floored size (so the
 // placed value is byte-identical to what the venue stores); plan.Notional is kept for
 // the budget reservation and the log — the sub-0.01-share floor difference is
@@ -332,8 +356,9 @@ func (a *App) reconcilePlace(
 	ctx context.Context,
 	logger *Logger,
 	m eligibleMarket,
-	noToken string,
-	midpoint float64,
+	yesToken string,
+	noSignalMidpoint float64,
+	yesMidpoint float64,
 	plan fundingResult,
 	desiredShares float64,
 	desiredPrice float64,
@@ -343,15 +368,15 @@ func (a *App) reconcilePlace(
 	if a.cfg.DryRun {
 		// Reserve from the LOCAL budget so subsequent markets see realistic numbers.
 		budget.reserve(plan.Notional)
-		a.logReconcileAction(logger, "would_place", m, noToken, midpoint, plan, desiredShares, desiredPrice, desiredExpiry, budget)
+		a.logReconcileAction(logger, "would_place", m, yesToken, noSignalMidpoint, yesMidpoint, plan, desiredShares, desiredPrice, desiredExpiry, budget)
 		return
 	}
 
-	resp, err := a.trading.PlaceOrderWithExpiration(ctx, noToken, desiredPrice, desiredShares, polymarket.Buy, desiredExpiry)
+	resp, err := a.trading.PlaceOrderWithExpiration(ctx, yesToken, desiredPrice, desiredShares, polymarket.Buy, desiredExpiry)
 	if err != nil {
 		logger.Event("reconcile_order", map[string]any{
 			"condition_id": m.Market.ConditionID,
-			"no_token_id":  noToken,
+			"yes_token_id": yesToken,
 			"status":       "place_failed",
 			"error":        err.Error(),
 		})
@@ -364,7 +389,7 @@ func (a *App) reconcilePlace(
 		}
 		logger.Event("reconcile_order", map[string]any{
 			"condition_id": m.Market.ConditionID,
-			"no_token_id":  noToken,
+			"yes_token_id": yesToken,
 			"status":       "place_rejected",
 			"error":        msg,
 		})
@@ -372,7 +397,7 @@ func (a *App) reconcilePlace(
 	}
 
 	budget.reserve(plan.Notional)
-	a.logReconcilePlaced(logger, m, noToken, midpoint, plan, desiredShares, desiredPrice, desiredExpiry, budget, resp.OrderID)
+	a.logReconcilePlaced(logger, m, yesToken, noSignalMidpoint, yesMidpoint, plan, desiredShares, desiredPrice, desiredExpiry, budget, resp.OrderID)
 }
 
 // reconcileCancel logs and (outside dry-run) submits a single cancellation, isolating
@@ -401,22 +426,24 @@ func (a *App) reconcileCancel(ctx context.Context, logger *Logger, conditionID s
 }
 
 // logReconcileAction emits a place/maintain decision log with the full detail set:
-// condition id, question, NO token, midpoint, shares, notional, close time,
+// condition id, question, YES token, NO signal midpoint, YES execution midpoint,
+// shares, notional, close time,
 // expiration, the run USDC remaining AFTER reservation, and the min-order-exception /
 // partial-fill flags. status names the action (maintained / would_place).
 func (a *App) logReconcileAction(
 	logger *Logger,
 	status string,
 	m eligibleMarket,
-	noToken string,
-	midpoint float64,
+	yesToken string,
+	noSignalMidpoint float64,
+	yesMidpoint float64,
 	plan fundingResult,
 	shares float64,
 	desiredPrice float64,
 	desiredExpiry int64,
 	budget *runBudget,
 ) {
-	logger.Event("reconcile_order", a.reconcileFields(status, m, noToken, midpoint, plan, shares, desiredPrice, desiredExpiry, budget, ""))
+	logger.Event("reconcile_order", a.reconcileFields(status, m, yesToken, noSignalMidpoint, yesMidpoint, plan, shares, desiredPrice, desiredExpiry, budget, ""))
 }
 
 // logReconcilePlaced emits a successful live-placement log, carrying the same full
@@ -424,8 +451,9 @@ func (a *App) logReconcileAction(
 func (a *App) logReconcilePlaced(
 	logger *Logger,
 	m eligibleMarket,
-	noToken string,
-	midpoint float64,
+	yesToken string,
+	noSignalMidpoint float64,
+	yesMidpoint float64,
 	plan fundingResult,
 	shares float64,
 	desiredPrice float64,
@@ -433,7 +461,7 @@ func (a *App) logReconcilePlaced(
 	budget *runBudget,
 	orderID string,
 ) {
-	logger.Event("reconcile_order", a.reconcileFields("placed", m, noToken, midpoint, plan, shares, desiredPrice, desiredExpiry, budget, orderID))
+	logger.Event("reconcile_order", a.reconcileFields("placed", m, yesToken, noSignalMidpoint, yesMidpoint, plan, shares, desiredPrice, desiredExpiry, budget, orderID))
 }
 
 // reconcileFields builds the structured field set shared by every place/maintain log
@@ -441,8 +469,9 @@ func (a *App) logReconcilePlaced(
 func (a *App) reconcileFields(
 	status string,
 	m eligibleMarket,
-	noToken string,
-	midpoint float64,
+	yesToken string,
+	noSignalMidpoint float64,
+	yesMidpoint float64,
 	plan fundingResult,
 	shares float64,
 	desiredPrice float64,
@@ -451,12 +480,14 @@ func (a *App) reconcileFields(
 	orderID string,
 ) map[string]any {
 	fields := map[string]any{
-		"condition_id": m.Market.ConditionID,
-		"question":     m.Market.Question,
-		"no_token_id":  noToken,
-		"status":       status,
-		"midpoint":     midpoint,
-		"price":        desiredPrice,
+		"condition_id":       m.Market.ConditionID,
+		"question":           m.Market.Question,
+		"yes_token_id":       yesToken,
+		"status":             status,
+		"no_signal_midpoint": noSignalMidpoint,
+		"yes_midpoint":       yesMidpoint,
+		"midpoint":           yesMidpoint,
+		"price":              desiredPrice,
 		// shares/notional reflect the venue-floored order actually submitted.
 		"shares":              shares,
 		"notional":            shares * desiredPrice,

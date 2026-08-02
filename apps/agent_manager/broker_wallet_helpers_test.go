@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/original-david-knight/go_wild/agent_data"
-	"github.com/original-david-knight/go_wild/tools"
 	"github.com/original-david-knight/go_wild/polymarket"
+	"github.com/original-david-knight/go_wild/tools"
 )
 
 func TestGetWalletTools_RequiresCompanyMembership(t *testing.T) {

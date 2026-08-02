@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 // staleTestApp wires an App to the fake at the fixed eligibility run time so
 // close-time arithmetic lines up with the markets built below.
 func staleTestApp(fake *fakeTradingClient, dryRun bool) *App {
+	ensureYesBooks(fake)
 	cfg := defaultConfig()
 	cfg.DryRun = dryRun
 	return &App{
@@ -48,15 +50,16 @@ func staleExpiry(closeIn time.Duration) string {
 	return strconv.FormatInt(closeAt.Add(-defaultOrderExpiryBefore).Unix(), 10)
 }
 
-// matchingOrder builds a NO buy order that matches every order-level criterion for
-// a market built with marketWith(condID, noID, _, closeIn, _): NO token asset, BUY
+// matchingOrder builds a YES buy order that matches every order-level criterion for
+// a market built with marketWith(condID, noID, yesID, closeIn, _): YES token asset, BUY
 // side, normalized price == midpoint (0.94), expiration == close-24h. Tests mutate
 // one field at a time to isolate a single stale reason.
 func matchingOrder(id, condID, noID string, closeIn time.Duration) polymarket.Order {
+	yesID := "yes" + strings.TrimPrefix(noID, "no")
 	return polymarket.Order{
 		ID:           id,
 		Market:       condID,
-		AssetID:      noID,
+		AssetID:      yesID,
 		Side:         "BUY",
 		OriginalSize: "100",
 		Price:        "0.94",
@@ -172,9 +175,9 @@ func TestStaleCancel_ReasonTable(t *testing.T) {
 			wantReason: cancelMarketIneligible,
 		},
 		{
-			name:       "yes_shares_owned",
-			positions:  []polymarket.Position{{Asset: yesID, Size: 5}},
-			wantReason: cancelYesSharesOwned,
+			name:       "no_shares_owned",
+			positions:  []polymarket.Position{{Asset: noID, Size: 5}},
+			wantReason: cancelNoSharesOwned,
 		},
 		{
 			name:       "wrong_side",
@@ -183,7 +186,7 @@ func TestStaleCancel_ReasonTable(t *testing.T) {
 		},
 		{
 			name:       "wrong_asset",
-			mutate:     func(o *polymarket.Order) { o.AssetID = yesID },
+			mutate:     func(o *polymarket.Order) { o.AssetID = noID },
 			wantReason: cancelWrongAsset,
 		},
 		{
@@ -278,7 +281,7 @@ func TestStaleCancel_AmountOnlyDifferenceKept(t *testing.T) {
 	}
 }
 
-// TestStaleCancel_DuplicatesKeepLowestID asserts that among N matching NO buy
+// TestStaleCancel_DuplicatesKeepLowestID asserts that among N matching YES buy
 // orders for one market, exactly one (the lowest ID) is kept and the rest are
 // canceled as duplicates, deterministically.
 func TestStaleCancel_DuplicatesKeepLowestID(t *testing.T) {

@@ -622,8 +622,8 @@ func codexLogPipelineEvent(agentID, line string, elapsed time.Duration) {
 		return
 	}
 	var event struct {
-		Type  string `json:"type"`
-		Item  *struct {
+		Type string `json:"type"`
+		Item *struct {
 			Type    string `json:"type"`
 			Text    string `json:"text"`
 			Message string `json:"message"`

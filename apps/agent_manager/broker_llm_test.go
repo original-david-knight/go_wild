@@ -8,9 +8,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"google.golang.org/genai"
 	data "github.com/original-david-knight/go_wild/agent_data"
 	loop "github.com/original-david-knight/go_wild/agentic_loop"
+	"google.golang.org/genai"
 )
 
 type mockBrokerLLMClient struct {

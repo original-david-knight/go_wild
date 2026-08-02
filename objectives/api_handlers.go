@@ -434,7 +434,7 @@ func (s *APIServer) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 
 	counts := make(map[string]int)
 	for _, status := range []ObjectiveStatus{StatusPending, StatusActive, StatusBlocked, StatusCompleted, StatusFailed, StatusPaused} {
-		objs, err := s.store.getByStatus(ctx, status)
+		objs, err := s.store.GetByStatus(ctx, status)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

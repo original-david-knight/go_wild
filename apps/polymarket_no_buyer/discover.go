@@ -57,11 +57,11 @@ const (
 	discoverMaxPages  = 50
 )
 
-// eligibleMarket is a discovered NO-buying candidate that passed every
+// eligibleMarket is a discovered YES-buying candidate that passed every
 // eligibility criterion. It carries the source market plus the derived values
 // later rungs reuse — the decoded YES/NO token IDs, the parsed close time, and
-// the computed NO midpoint — so sizing and order placement need not re-decode or
-// re-fetch them.
+// the computed NO signal midpoint. The signal intentionally remains NO-based so
+// this reversal targets exactly the markets the old strategy would have bought.
 type eligibleMarket struct {
 	Market   polymarket.Market
 	Tokens   binaryTokens
@@ -119,7 +119,7 @@ func (a *App) discoverEligibleMarkets(ctx context.Context, logger *Logger) ([]el
 	for _, m := range markets {
 		tokens, tokensReason := decodeBinaryTokens(m)
 
-		// Cheap filters first (state, binary, close window, liquidity, YES owned) —
+		// Cheap filters first (state, binary, close window, liquidity, NO owned) —
 		// no network call.
 		if reason := marketPreCheck(m, now, a.cfg, owned, tokens, tokensReason); reason != "" {
 			reject(m, reason)
@@ -216,8 +216,8 @@ func (a *App) listAllMarkets(ctx context.Context) ([]polymarket.Market, error) {
 }
 
 // ownedTokenIDs builds the set of CLOB token IDs the account currently holds with
-// a positive size. The predicate checks a market's YES token ID against this set
-// to reject markets where YES shares are already owned. A zero/negative size is
+// a positive size. The predicate checks a market's NO token ID against this set
+// to reject markets where the opposing outcome is already owned. A zero/negative size is
 // treated as not owned.
 func ownedTokenIDs(positions []polymarket.Position) map[string]bool {
 	owned := make(map[string]bool, len(positions))
