@@ -1,4 +1,4 @@
-go 1.25
+go 1.25.0
 
 use (
 	./agent_auth
@@ -19,6 +19,7 @@ use (
 	./crypto
 	./data
 	./deep_research
+	./googleauth
 	./knowledge_graph
 	./my
 	./objectives
@@ -46,6 +47,7 @@ replace (
 	github.com/original-david-knight/go_wild/crypto v0.0.0 => ./crypto
 	github.com/original-david-knight/go_wild/data v0.0.0 => ./data
 	github.com/original-david-knight/go_wild/deep_research v0.0.0 => ./deep_research
+	github.com/original-david-knight/go_wild/googleauth v0.0.0 => ./googleauth
 	github.com/original-david-knight/go_wild/knowledge_graph v0.0.0 => ./knowledge_graph
 	github.com/original-david-knight/go_wild/my v0.0.0 => ./my
 	github.com/original-david-knight/go_wild/objectives v0.0.0 => ./objectives
