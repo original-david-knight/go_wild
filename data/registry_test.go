@@ -206,3 +206,55 @@ func TestRegistry_AddAllTables_ProviderError(t *testing.T) {
 		t.Fatalf("expected wrapped error to include %v, got %v", expectedErr, err)
 	}
 }
+
+// sameNameA and sameNameB have the same struct base name via aliasing? Go
+// forbids two types of one name in one package, so the collision is proven
+// through metadata directly: two metas whose types share a name but not a
+// table must both stay resolvable.
+type CollisionReading struct {
+	ID string `json:"id"`
+}
+
+func (CollisionReading) TableName() string { return "collision_a_readings" }
+
+type CollisionReadingB struct {
+	ID string `json:"id"`
+}
+
+func (CollisionReadingB) TableName() string { return "collision_b_readings" }
+
+// TestSameStructNameDifferentTables pins the registry's key: the table name,
+// not the bare struct name. Two packages can each register a model named
+// `Reading`; keying on the type name silently hands one of them the other's
+// table (found at lifedash M8: pollers.Reading vs weight.Reading).
+func TestSameStructNameDifferentTables(t *testing.T) {
+	db, err := NewSqliteDatabase(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if err := db.AddTable(CollisionReading{}); err != nil {
+		t.Fatalf("add a: %v", err)
+	}
+	if err := db.AddTable(CollisionReadingB{}); err != nil {
+		t.Fatalf("add b: %v", err)
+	}
+
+	if err := db.Table(CollisionReading{}).Insert(context.Background(), &CollisionReading{ID: "a-1"}); err != nil {
+		t.Fatalf("insert a: %v", err)
+	}
+	if err := db.Table(CollisionReadingB{}).Insert(context.Background(), &CollisionReadingB{ID: "b-1"}); err != nil {
+		t.Fatalf("insert b: %v", err)
+	}
+
+	rowsA, err := db.Table(CollisionReading{}).Query(context.Background(), QueryOpts{})
+	if err != nil {
+		t.Fatalf("query a: %v", err)
+	}
+	if len(rowsA) != 1 {
+		t.Fatalf("table a has %d rows, want its own 1", len(rowsA))
+	}
+	if _, ok := rowsA[0].(*CollisionReading); !ok {
+		t.Fatalf("table a hydrated %T, want *CollisionReading", rowsA[0])
+	}
+}

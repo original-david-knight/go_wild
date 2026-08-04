@@ -318,11 +318,17 @@ func setUserID(model any, userID string) {
 	}
 }
 
+// tableMeta resolves a model to its registered metadata. Keyed by table name,
+// not struct name: two packages may each have a model named Reading, and a
+// registry keyed on the bare type name silently hands one of them the other's
+// table.
 func tableMeta(tables map[string]*modelMeta, model any) *modelMeta {
+	if namer, ok := model.(tableNamer); ok {
+		return tables[namer.TableName()]
+	}
 	t := reflect.TypeOf(model)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
-
-	return tables[t.Name()]
+	return tables[toSnakeCase(t.Name())+"s"]
 }

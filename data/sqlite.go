@@ -65,7 +65,7 @@ func (s *SqliteDatabase) AddTable(model any) error {
 		return fmt.Errorf("failed to migrate table %s: %w", meta.TableName, err)
 	}
 
-	s.tables[meta.Type.Name()] = meta
+	s.tables[meta.TableName] = meta
 	return nil
 }
 

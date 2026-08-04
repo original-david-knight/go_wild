@@ -57,7 +57,7 @@ func (p *PostgresDatabase) AddTable(model any) error {
 		return fmt.Errorf("failed to migrate table %s: %w", meta.TableName, err)
 	}
 
-	p.tables[meta.Type.Name()] = meta
+	p.tables[meta.TableName] = meta
 	return nil
 }
 
