@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"net/http"
 	"sync"
 
 	"google.golang.org/genai"
@@ -19,10 +20,22 @@ type GeminiClient struct {
 // NewGeminiClient creates a new Gemini client.
 // If apiKey is empty, it will use the GEMINI_API_KEY environment variable.
 func NewGeminiClient(ctx context.Context, apiKey string, model string) (*GeminiClient, error) {
+	return NewGeminiClientWithHTTPClient(ctx, apiKey, model, nil)
+}
+
+// NewGeminiClientWithHTTPClient creates a Gemini client over a caller-supplied
+// http.Client — the seam for a recording or otherwise instrumented transport,
+// matching what the OpenAI and Anthropic paths already honour. A nil client
+// keeps the SDK's default.
+func NewGeminiClientWithHTTPClient(ctx context.Context, apiKey string, model string, httpClient *http.Client) (*GeminiClient, error) {
 	var opts *genai.ClientConfig
-	if apiKey != "" {
-		opts = &genai.ClientConfig{
-			APIKey: apiKey,
+	if apiKey != "" || httpClient != nil {
+		opts = &genai.ClientConfig{}
+		if apiKey != "" {
+			opts.APIKey = apiKey
+		}
+		if httpClient != nil {
+			opts.HTTPClient = httpClient
 		}
 	}
 

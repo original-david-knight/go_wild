@@ -194,6 +194,9 @@ func NewProviderClient(ctx context.Context, cfg ProviderClientConfig) (LLMClient
 			HTTPClient: cfg.HTTPClient,
 		})
 	default:
+		if cfg.HTTPClient != nil {
+			return NewGeminiClientWithHTTPClient(ctx, cfg.APIKey, model, cfg.HTTPClient)
+		}
 		return NewGeminiClient(ctx, cfg.APIKey, model)
 	}
 }
