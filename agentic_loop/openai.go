@@ -919,3 +919,9 @@ func (r *openAIResponsesAPIResponse) toGenerateResponse() (*GenerateResponse, er
 	}
 	return resp, nil
 }
+
+// GenerateContentStreaming satisfies the streaming seam with the single-delta
+// fallback: no native OpenAI streaming path is wired yet (lifedash M17).
+func (c *openAIClient) GenerateContentStreaming(ctx context.Context, contents []*genai.Content, config *GenerateContentConfig, sink func(string)) (*GenerateResponse, error) {
+	return SingleDeltaFallback(ctx, c, contents, config, sink)
+}

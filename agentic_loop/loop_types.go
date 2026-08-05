@@ -27,6 +27,14 @@ const (
 // implementations (e.g., a broker proxy client) via WithLLMClient.
 type LLMClient interface {
 	GenerateContent(ctx context.Context, contents []*genai.Content, config *GenerateContentConfig) (*GenerateResponse, error)
+	// GenerateContentStreaming generates like GenerateContent while handing
+	// each text delta to sink as it arrives; the returned response is the
+	// assembled whole — same content, calls, usage and finish reason the
+	// blocking call would have returned (lifedash M17). Implementations with
+	// no native streaming satisfy it with SingleDeltaFallback: one delta
+	// carrying the whole text, so the interface stays uniform across
+	// providers.
+	GenerateContentStreaming(ctx context.Context, contents []*genai.Content, config *GenerateContentConfig, sink func(delta string)) (*GenerateResponse, error)
 	SetModel(model string)
 	GetModel() string
 	Close() error
@@ -49,4 +57,8 @@ type AgenticLoop struct {
 	responseTimeout  time.Duration // Timeout for each API call (0 = no timeout)
 	compactFunc      CompactFunc   // Optional mid-run compaction callback
 	compactTokens    int           // Token threshold to trigger mid-run compaction (0 = disabled)
+	// streamTokens routes generation through GenerateContentStreaming, so
+	// TextDeltaEvent carries real incremental deltas rather than the whole
+	// turn's text at once (lifedash M17). Off, nothing changes.
+	streamTokens bool
 }

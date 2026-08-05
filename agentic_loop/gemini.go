@@ -240,3 +240,10 @@ func (c *GeminiClient) Close() error {
 	// for future compatibility and interface consistency.
 	return nil
 }
+
+// GenerateContentStreaming streams one generation over the real Gemini
+// streaming API (lifedash M17): each text chunk reaches sink as it arrives,
+// and the assembled response is what GenerateContent would have returned.
+func (c *GeminiClient) GenerateContentStreaming(ctx context.Context, contents []*genai.Content, config *GenerateContentConfig, sink func(string)) (*GenerateResponse, error) {
+	return AssembleStream(c.GenerateContentStream(ctx, contents, config), sink)
+}

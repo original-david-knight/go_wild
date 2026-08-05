@@ -55,7 +55,7 @@ func (l *AgenticLoop) runLoop(ctx context.Context, history []Message, events cha
 		events <- ThinkingEvent{Turn: turn}
 
 		// Generate response with retry for transient errors
-		resp, err := l.generateWithRetry(ctx, contents, config, 3)
+		resp, streamed, err := l.generate(ctx, contents, config, 3, events)
 		if err != nil {
 			events <- ErrorEvent{Err: fmt.Errorf("generation error: %w", err)}
 			// Still emit DoneEvent so callers get accumulated text and history
@@ -101,9 +101,13 @@ func (l *AgenticLoop) runLoop(ctx context.Context, history []Message, events cha
 		var functionCalls []*genai.FunctionCall
 		if resp.Content != nil {
 			for _, part := range resp.Content.Parts {
-				// Emit text
+				// Emit text. A streamed turn already emitted its deltas as
+				// they arrived; re-emitting the assembled text would double
+				// every message.
 				if part.Text != "" {
-					events <- TextDeltaEvent{Text: part.Text}
+					if !streamed {
+						events <- TextDeltaEvent{Text: part.Text}
+					}
 					finalText += part.Text
 				}
 
@@ -145,7 +149,7 @@ func (l *AgenticLoop) runLoop(ctx context.Context, history []Message, events cha
 					// Tools deliberately omitted to force text output
 				}
 				events <- ThinkingEvent{Turn: turn}
-				retryResp, retryErr := l.generateWithRetry(ctx, contents, textOnlyConfig, 3)
+				retryResp, retryStreamed, retryErr := l.generate(ctx, contents, textOnlyConfig, 3, events)
 				if retryErr == nil {
 					if retryResp.Usage != nil {
 						totalUsage.PromptTokens = retryResp.Usage.PromptTokens
@@ -155,7 +159,9 @@ func (l *AgenticLoop) runLoop(ctx context.Context, history []Message, events cha
 					if retryResp.Content != nil {
 						for _, part := range retryResp.Content.Parts {
 							if part.Text != "" {
-								events <- TextDeltaEvent{Text: part.Text}
+								if !retryStreamed {
+									events <- TextDeltaEvent{Text: part.Text}
+								}
 								finalText += part.Text
 							}
 						}
@@ -237,7 +243,7 @@ func (l *AgenticLoop) runLoop(ctx context.Context, history []Message, events cha
 		}
 
 		events <- ThinkingEvent{Turn: turn + 1}
-		resp, err := l.generateWithRetry(ctx, contents, finalConfig, 3)
+		resp, streamed, err := l.generate(ctx, contents, finalConfig, 3, events)
 		if err == nil {
 			if resp.Usage != nil {
 				totalUsage.PromptTokens = resp.Usage.PromptTokens
@@ -247,7 +253,9 @@ func (l *AgenticLoop) runLoop(ctx context.Context, history []Message, events cha
 			if resp.Content != nil {
 				for _, part := range resp.Content.Parts {
 					if part.Text != "" {
-						events <- TextDeltaEvent{Text: part.Text}
+						if !streamed {
+							events <- TextDeltaEvent{Text: part.Text}
+						}
 						finalText += part.Text
 					}
 				}

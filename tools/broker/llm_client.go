@@ -119,3 +119,9 @@ func (c *LLMClient) GetModel() string {
 func (c *LLMClient) Close() error {
 	return nil
 }
+
+// GenerateContentStreaming satisfies the streaming seam with the single-delta
+// fallback: the broker protocol has no streaming path (lifedash M17).
+func (c *LLMClient) GenerateContentStreaming(ctx context.Context, contents []*genai.Content, config *loop.GenerateContentConfig, sink func(string)) (*loop.GenerateResponse, error) {
+	return loop.SingleDeltaFallback(ctx, c, contents, config, sink)
+}

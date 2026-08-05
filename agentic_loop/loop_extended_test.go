@@ -491,3 +491,7 @@ func TestWithLLMClient(t *testing.T) {
 		t.Error("expected custom LLM client to be set")
 	}
 }
+
+func (m *mockLLMClient) GenerateContentStreaming(ctx context.Context, contents []*genai.Content, config *GenerateContentConfig, sink func(string)) (*GenerateResponse, error) {
+	return SingleDeltaFallback(ctx, m, contents, config, sink)
+}

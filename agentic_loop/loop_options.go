@@ -14,6 +14,18 @@ func WithSystemPrompt(prompt string) Option {
 	}
 }
 
+// WithTokenStreaming makes the loop generate through the client's streaming
+// method: each TextDeltaEvent then carries one real token delta as it
+// arrives, and the loop pauses the stream around tool execution — the
+// ToolCallEvent/ToolResultEvent pair — before the continuation streams on
+// (lifedash M17). The assembled turn, and therefore the history, is
+// byte-identical to the blocking path's.
+func WithTokenStreaming() Option {
+	return func(l *AgenticLoop) {
+		l.streamTokens = true
+	}
+}
+
 // WithMaxTurns sets the maximum number of agentic turns.
 func WithMaxTurns(maxTurns int) Option {
 	return func(l *AgenticLoop) {

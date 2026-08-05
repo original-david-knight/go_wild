@@ -370,3 +370,9 @@ func (r *anthropicMessagesResponse) toGenerateResponse() (*GenerateResponse, err
 	}
 	return resp, nil
 }
+
+// GenerateContentStreaming satisfies the streaming seam with the single-delta
+// fallback: no native Anthropic streaming path is wired yet (lifedash M17).
+func (c *anthropicClient) GenerateContentStreaming(ctx context.Context, contents []*genai.Content, config *GenerateContentConfig, sink func(string)) (*GenerateResponse, error) {
+	return SingleDeltaFallback(ctx, c, contents, config, sink)
+}

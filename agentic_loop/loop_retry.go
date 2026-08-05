@@ -123,3 +123,47 @@ func (l *AgenticLoop) generateWithRetry(ctx context.Context, contents []*genai.C
 
 	return nil, fmt.Errorf("failed after retries: %w", lastErr)
 }
+
+// generate is every turn's generation step. With token streaming off it is
+// generateWithRetry unchanged; with it on, deltas flow into the event channel
+// as the client hands them over, and the reported bool tells the caller its
+// text has already been emitted (lifedash M17).
+func (l *AgenticLoop) generate(ctx context.Context, contents []*genai.Content, config *GenerateContentConfig, maxRetries int, events chan<- Event) (*GenerateResponse, bool, error) {
+	if !l.streamTokens {
+		resp, err := l.generateWithRetry(ctx, contents, config, maxRetries)
+		return resp, false, err
+	}
+	resp, err := l.generateStreamingWithRetry(ctx, contents, config, maxRetries, events)
+	return resp, true, err
+}
+
+// generateStreamingWithRetry retries a streamed generation only while nothing
+// has been emitted: once a delta has reached the caller, a retry would replay
+// it, so a mid-stream failure is returned as the error it is — the consumer
+// shows the factual failure line and keeps the partial text (the M17 error
+// path), rather than reading the same sentence twice.
+func (l *AgenticLoop) generateStreamingWithRetry(ctx context.Context, contents []*genai.Content, config *GenerateContentConfig, maxRetries int, events chan<- Event) (*GenerateResponse, error) {
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(addJitter(time.Duration(attempt) * time.Second)):
+			}
+		}
+		emitted := false
+		resp, err := l.client.GenerateContentStreaming(ctx, contents, config, func(delta string) {
+			emitted = true
+			events <- TextDeltaEvent{Text: delta}
+		})
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		if emitted || ctx.Err() != nil {
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}

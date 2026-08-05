@@ -186,3 +186,7 @@ func TestResolveBrokerRequestedModel_IgnoresMismatchedProviderModel(t *testing.T
 		t.Fatalf("expected %q, got %q", loop.DefaultOpenAIModel, got)
 	}
 }
+
+func (m *mockBrokerLLMClient) GenerateContentStreaming(ctx context.Context, contents []*genai.Content, config *loop.GenerateContentConfig, sink func(string)) (*loop.GenerateResponse, error) {
+	return loop.SingleDeltaFallback(ctx, m, contents, config, sink)
+}
