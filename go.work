@@ -19,6 +19,7 @@ use (
 	./crypto
 	./data
 	./deep_research
+	./feeds
 	./gmailtriage
 	./googleauth
 	./knowledge_graph
