@@ -24,6 +24,7 @@ use (
 	./googleauth
 	./knowledge_graph
 	./my
+	./oauth2app
 	./objectives
 	./objectives_planner
 	./polymarket
@@ -53,6 +54,7 @@ replace (
 	github.com/original-david-knight/go_wild/googleauth v0.0.0 => ./googleauth
 	github.com/original-david-knight/go_wild/knowledge_graph v0.0.0 => ./knowledge_graph
 	github.com/original-david-knight/go_wild/my v0.0.0 => ./my
+	github.com/original-david-knight/go_wild/oauth2app v0.0.0 => ./oauth2app
 	github.com/original-david-knight/go_wild/objectives v0.0.0 => ./objectives
 	github.com/original-david-knight/go_wild/objectives_planner v0.0.0 => ./objectives_planner
 	github.com/original-david-knight/go_wild/polymarket v0.0.0 => ./polymarket

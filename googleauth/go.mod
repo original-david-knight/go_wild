@@ -3,6 +3,7 @@ module github.com/original-david-knight/go_wild/googleauth
 go 1.25.0
 
 require (
+	github.com/original-david-knight/go_wild/oauth2app v0.0.0
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.291.0
 )

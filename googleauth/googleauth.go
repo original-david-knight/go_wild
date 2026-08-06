@@ -18,8 +18,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
+	"github.com/original-david-knight/go_wild/oauth2app"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
@@ -164,7 +164,10 @@ func (r *Registry) Disconnect(account string) error { return r.store.Delete(acco
 
 // TokenSource returns an auto-refreshing source for an account. A refresh
 // rotates the token, and a rotated token that is not written back is lost on
-// the next restart — so every refresh persists through the store.
+// the next restart — so every refresh persists through oauth2app's
+// persisting source, which also carries a refresh token the response omitted
+// forward so a rotation can never blank the only credential that survives a
+// restart.
 func (r *Registry) TokenSource(ctx context.Context, account string) (oauth2.TokenSource, error) {
 	tok, err := r.store.Load(account)
 	if err != nil {
@@ -176,55 +179,11 @@ func (r *Registry) TokenSource(ctx context.Context, account string) (oauth2.Toke
 	// The redirect URL is only used during the code exchange; refreshing needs
 	// the client credentials and the token endpoint alone.
 	base := r.oauthConfig("").TokenSource(ctx, tok)
-	return &persistingSource{
-		account: account,
-		store:   r.store,
-		source:  base,
-		last:    tok,
-	}, nil
-}
-
-// persistingSource writes a rotated token back to the store.
-type persistingSource struct {
-	account string
-	store   TokenStore
-	source  oauth2.TokenSource
-	last    *oauth2.Token
-}
-
-func (p *persistingSource) Token() (*oauth2.Token, error) {
-	tok, err := p.source.Token()
-	if err != nil {
-		return nil, err
-	}
-	if p.last == nil || tok.AccessToken != p.last.AccessToken {
-		// Google omits the refresh token on a refresh response; oauth2 carries
-		// the old one forward, but guard it so a rotation can never blank the
-		// only credential that survives a restart.
-		if tok.RefreshToken == "" && p.last != nil {
-			tok.RefreshToken = p.last.RefreshToken
-		}
-		if err := p.store.Save(p.account, tok); err != nil {
-			return nil, fmt.Errorf("persist refreshed token for %s: %w", p.account, err)
-		}
-		p.last = tok
-	}
-	return tok, nil
+	return oauth2app.NewPersistingSource(account, r.store, base, tok), nil
 }
 
 // normalizeAccount keeps account names to the shape that is safe in a
 // filename, since the file store derives paths from them.
 func normalizeAccount(account string) (string, error) {
-	name := strings.TrimSpace(strings.ToLower(account))
-	if name == "" {
-		return "", fmt.Errorf("account name is empty")
-	}
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
-		default:
-			return "", fmt.Errorf("account name %q may hold only letters, digits, - and _", account)
-		}
-	}
-	return name, nil
+	return oauth2app.NormalizeAccount(account)
 }
