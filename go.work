@@ -14,6 +14,7 @@ use (
 	./apps/objectives
 	./apps/polymarket_no_buyer
 	./apps/screen_agent
+	./chromeprofile
 	./claudellm
 	./codexllm
 	./crypto
@@ -28,6 +29,7 @@ use (
 	./oauth2app
 	./objectives
 	./objectives_planner
+	./pollers
 	./polymarket
 	./tools
 )
@@ -46,11 +48,13 @@ replace (
 	github.com/original-david-knight/go_wild/apps/objectives v0.0.0 => ./apps/objectives
 	github.com/original-david-knight/go_wild/apps/polymarket_no_buyer v0.0.0 => ./apps/polymarket_no_buyer
 	github.com/original-david-knight/go_wild/apps/screen_agent v0.0.0 => ./apps/screen_agent
+	github.com/original-david-knight/go_wild/chromeprofile v0.0.0 => ./chromeprofile
 	github.com/original-david-knight/go_wild/claudellm v0.0.0 => ./claudellm
 	github.com/original-david-knight/go_wild/codexllm v0.0.0 => ./codexllm
 	github.com/original-david-knight/go_wild/crypto v0.0.0 => ./crypto
 	github.com/original-david-knight/go_wild/data v0.0.0 => ./data
 	github.com/original-david-knight/go_wild/deep_research v0.0.0 => ./deep_research
+	github.com/original-david-knight/go_wild/feeds v0.0.0 => ./feeds
 	github.com/original-david-knight/go_wild/gmailtriage v0.0.0 => ./gmailtriage
 	github.com/original-david-knight/go_wild/googleauth v0.0.0 => ./googleauth
 	github.com/original-david-knight/go_wild/httpx v0.0.0 => ./httpx
@@ -59,6 +63,7 @@ replace (
 	github.com/original-david-knight/go_wild/oauth2app v0.0.0 => ./oauth2app
 	github.com/original-david-knight/go_wild/objectives v0.0.0 => ./objectives
 	github.com/original-david-knight/go_wild/objectives_planner v0.0.0 => ./objectives_planner
+	github.com/original-david-knight/go_wild/pollers v0.0.0 => ./pollers
 	github.com/original-david-knight/go_wild/polymarket v0.0.0 => ./polymarket
 	github.com/original-david-knight/go_wild/tools v0.0.0 => ./tools
 )
