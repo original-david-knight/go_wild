@@ -7,11 +7,9 @@ use (
 	./agent_node
 	./agentic_loop
 	./apps/agent
-	./apps/agent_manager
 	./apps/agent_net_admin
 	./apps/agent_net_server
 	./apps/mcp-broker-server
-	./apps/objectives
 	./apps/polymarket_no_buyer
 	./apps/screen_agent
 	./chromeprofile
@@ -28,7 +26,6 @@ use (
 	./my
 	./oauth2app
 	./objectives
-	./objectives_planner
 	./pollers
 	./polymarket
 	./tools
@@ -41,11 +38,9 @@ replace (
 	github.com/original-david-knight/go_wild/agent_node v0.0.0 => ./agent_node
 	github.com/original-david-knight/go_wild/agentic_loop v0.0.0 => ./agentic_loop
 	github.com/original-david-knight/go_wild/apps/agent v0.0.0 => ./apps/agent
-	github.com/original-david-knight/go_wild/apps/agent_manager v0.0.0 => ./apps/agent_manager
 	github.com/original-david-knight/go_wild/apps/agent_net_admin v0.0.0 => ./apps/agent_net_admin
 	github.com/original-david-knight/go_wild/apps/agent_net_server v0.0.0 => ./apps/agent_net_server
 	github.com/original-david-knight/go_wild/apps/mcp-broker-server v0.0.0 => ./apps/mcp-broker-server
-	github.com/original-david-knight/go_wild/apps/objectives v0.0.0 => ./apps/objectives
 	github.com/original-david-knight/go_wild/apps/polymarket_no_buyer v0.0.0 => ./apps/polymarket_no_buyer
 	github.com/original-david-knight/go_wild/apps/screen_agent v0.0.0 => ./apps/screen_agent
 	github.com/original-david-knight/go_wild/chromeprofile v0.0.0 => ./chromeprofile
@@ -62,7 +57,6 @@ replace (
 	github.com/original-david-knight/go_wild/my v0.0.0 => ./my
 	github.com/original-david-knight/go_wild/oauth2app v0.0.0 => ./oauth2app
 	github.com/original-david-knight/go_wild/objectives v0.0.0 => ./objectives
-	github.com/original-david-knight/go_wild/objectives_planner v0.0.0 => ./objectives_planner
 	github.com/original-david-knight/go_wild/pollers v0.0.0 => ./pollers
 	github.com/original-david-knight/go_wild/polymarket v0.0.0 => ./polymarket
 	github.com/original-david-knight/go_wild/tools v0.0.0 => ./tools

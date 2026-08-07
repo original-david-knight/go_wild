@@ -9,9 +9,6 @@ func init() {
 		if err := db.AddTable(Objective{}); err != nil {
 			return err
 		}
-		if err := db.AddTable(ActivityEvent{}); err != nil {
-			return err
-		}
-		return db.AddTable(Escalation{})
+		return db.AddTable(ActivityEvent{})
 	})
 }

@@ -4,7 +4,6 @@ go 1.25
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/websocket v1.5.3
 	github.com/original-david-knight/go_wild/data v0.0.0
 )
 

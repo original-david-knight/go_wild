@@ -2,9 +2,7 @@ package objectives
 
 import (
 	"context"
-	"reflect"
 	"testing"
-	"time"
 
 	"github.com/original-david-knight/go_wild/data"
 )
@@ -251,36 +249,6 @@ func TestObjectiveStore_ApplyMutations(t *testing.T) {
 	}
 }
 
-func TestObjectiveStore_CreateInheritsToolAllowlist(t *testing.T) {
-	db := setupTestDB(t)
-	store := NewObjectiveStore(db, "")
-	ctx := context.Background()
-
-	root := &Objective{
-		Title:         "Root",
-		ToolAllowlist: []string{"read_webpage", "http_request"},
-	}
-	if err := store.Create(ctx, root); err != nil {
-		t.Fatalf("create root: %v", err)
-	}
-
-	child := &Objective{
-		Title:    "Child",
-		ParentID: root.ID,
-	}
-	if err := store.Create(ctx, child); err != nil {
-		t.Fatalf("create child: %v", err)
-	}
-
-	got, err := store.Get(ctx, child.ID)
-	if err != nil {
-		t.Fatalf("get child: %v", err)
-	}
-	if !reflect.DeepEqual(got.ToolAllowlist, root.ToolAllowlist) {
-		t.Fatalf("expected inherited allowlist %v, got %v", root.ToolAllowlist, got.ToolAllowlist)
-	}
-}
-
 func TestActivityStore(t *testing.T) {
 	db := setupTestDB(t)
 	activity := NewActivityStore(db, "")
@@ -363,44 +331,6 @@ func TestObjectiveStore_CompanyScopeIsolation(t *testing.T) {
 
 	if _, err := globalStore.Get(ctx, rootB.ID); err != nil {
 		t.Fatalf("expected rootB to still exist after rejected delete, got: %v", err)
-	}
-}
-
-func TestObjectiveStore_ResolveEscalationHonorsCompanyScope(t *testing.T) {
-	db := setupTestDB(t)
-	ctx := context.Background()
-
-	storeA := NewObjectiveStore(db, "company-a")
-	storeB := NewObjectiveStore(db, "company-b")
-
-	objB := &Objective{Title: "Mission B"}
-	if err := storeB.Create(ctx, objB); err != nil {
-		t.Fatalf("create objB: %v", err)
-	}
-
-	esc := &Escalation{
-		ID:          "esc-company-b",
-		ObjectiveID: objB.ID,
-		Question:    "Need a decision",
-		Context:     "context",
-		Severity:    SeverityWarning,
-		Status:      EscalationPending,
-		CreatedAt:   time.Now().UTC(),
-	}
-	if err := db.Table(Escalation{}).Insert(ctx, esc); err != nil {
-		t.Fatalf("insert escalation: %v", err)
-	}
-
-	if _, err := storeA.ResolveEscalation(ctx, esc.ID, "answer"); err == nil {
-		t.Fatal("expected cross-company escalation resolution to be rejected")
-	}
-
-	resolved, err := storeB.ResolveEscalation(ctx, esc.ID, "answer")
-	if err != nil {
-		t.Fatalf("resolve escalation in owning company: %v", err)
-	}
-	if resolved.Status != EscalationResolved {
-		t.Fatalf("expected escalation resolved, got %s", resolved.Status)
 	}
 }
 

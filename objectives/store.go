@@ -51,12 +51,6 @@ func (s *ObjectiveStore) Create(ctx context.Context, obj *Objective) error {
 	if obj.Status == "" {
 		obj.Status = StatusPending
 	}
-	if obj.AutonomyLevel == "" {
-		obj.AutonomyLevel = AutonomyFull
-	}
-	if obj.ScheduleType == "" {
-		obj.ScheduleType = ScheduleOneShot
-	}
 	if s.companyID != "" {
 		obj.CompanyID = s.companyID
 	}
@@ -72,9 +66,6 @@ func (s *ObjectiveStore) Create(ctx context.Context, obj *Objective) error {
 			return fmt.Errorf("create objective: parent %s belongs to a different company", obj.ParentID)
 		}
 		obj.Depth = parent.Depth + 1
-		if len(obj.ToolAllowlist) == 0 && len(parent.ToolAllowlist) > 0 {
-			obj.ToolAllowlist = append([]string(nil), parent.ToolAllowlist...)
-		}
 	}
 	obj.CreatedAt = now
 	obj.UpdatedAt = now
@@ -121,7 +112,7 @@ func (s *ObjectiveStore) Update(ctx context.Context, obj *Objective) error {
 	return s.db.Table(Objective{}).Update(ctx, obj)
 }
 
-// Delete removes an objective and its entire subtree, plus related escalations and activity.
+// Delete removes an objective and its entire subtree, plus related activity.
 func (s *ObjectiveStore) Delete(ctx context.Context, id string) error {
 	if _, err := s.Get(ctx, id); err != nil {
 		return err
@@ -133,16 +124,6 @@ func (s *ObjectiveStore) Delete(ctx context.Context, id string) error {
 	}
 
 	for _, obj := range tree {
-		// Delete related escalations
-		escs, _ := s.db.Table(Escalation{}).Query(ctx, gowild_data.QueryOpts{
-			Where: map[string]any{"objective_id": obj.ID},
-		})
-		for _, e := range escs {
-			if esc, ok := e.(*Escalation); ok {
-				s.db.Table(Escalation{}).Delete(ctx, esc.ID)
-			}
-		}
-
 		// Delete related activity events
 		events, _ := s.db.Table(ActivityEvent{}).Query(ctx, gowild_data.QueryOpts{
 			Where: map[string]any{"objective_id": obj.ID},
@@ -279,14 +260,11 @@ func (s *ObjectiveStore) ApplyMutations(ctx context.Context, mutations []TreeMut
 				}
 
 				obj := &Objective{
-					ParentID:      parentID,
-					Title:         m.Title,
-					Description:   m.Description,
-					Status:        StatusPending,
-					Priority:      m.Priority,
-					ScheduleType:  m.ScheduleType,
-					ScheduleCron:  m.ScheduleCron,
-					ToolAllowlist: m.ToolAllowlist,
+					ParentID:    parentID,
+					Title:       m.Title,
+					Description: m.Description,
+					Status:      StatusPending,
+					Priority:    m.Priority,
 				}
 				// Calculate depth and inherit CompanyID from parent
 				if parentID != "" {
@@ -334,15 +312,6 @@ func (s *ObjectiveStore) ApplyMutations(ctx context.Context, mutations []TreeMut
 				if m.Priority != 0 {
 					obj.Priority = m.Priority
 				}
-				if m.ScheduleType != "" {
-					obj.ScheduleType = m.ScheduleType
-				}
-				if m.ScheduleCron != "" {
-					obj.ScheduleCron = m.ScheduleCron
-				}
-				if m.ToolAllowlist != nil {
-					obj.ToolAllowlist = m.ToolAllowlist
-				}
 				if err := txStore.Update(ctx, obj); err != nil {
 					return fmt.Errorf("update mutation %s: %w", m.ObjectiveID, err)
 				}
@@ -374,113 +343,6 @@ func (s *ObjectiveStore) ApplyMutations(ctx context.Context, mutations []TreeMut
 	})
 }
 
-// GetEscalations returns pending escalations for a given objective.
-// Deduplicates by question text — only the first pending escalation per unique question is returned.
-// Pending escalations whose question was already resolved are auto-resolved and skipped.
-func (s *ObjectiveStore) GetEscalations(ctx context.Context, objectiveID string) []*Escalation {
-	if s.companyID != "" {
-		if _, err := s.Get(ctx, objectiveID); err != nil {
-			return []*Escalation{}
-		}
-	}
-
-	// Get resolved questions to detect stale duplicates
-	resolved, _ := s.db.Table(Escalation{}).Query(ctx, gowild_data.QueryOpts{
-		Where: map[string]any{"objective_id": objectiveID, "status": string(EscalationResolved)},
-	})
-	resolvedQuestions := make(map[string]string) // question -> resolution
-	for _, r := range resolved {
-		if e, ok := r.(*Escalation); ok {
-			resolvedQuestions[e.Question] = e.Resolution
-		}
-	}
-
-	results, err := s.db.Table(Escalation{}).Query(ctx, gowild_data.QueryOpts{
-		Where:     map[string]any{"objective_id": objectiveID, "status": string(EscalationPending)},
-		OrderBy:   "created_at",
-		OrderDesc: true,
-	})
-	if err != nil {
-		return nil
-	}
-
-	seen := make(map[string]bool)
-	escs := make([]*Escalation, 0, len(results))
-	for _, r := range results {
-		e, ok := r.(*Escalation)
-		if !ok {
-			continue
-		}
-		// Auto-resolve if this question was already answered
-		if res, answered := resolvedQuestions[e.Question]; answered {
-			e.Status = EscalationResolved
-			e.Resolution = res
-			e.ResolvedAt = time.Now().UTC()
-			s.db.Table(Escalation{}).Update(ctx, e)
-			continue
-		}
-		// Deduplicate by question text
-		if seen[e.Question] {
-			continue
-		}
-		seen[e.Question] = true
-		escs = append(escs, e)
-	}
-	return escs
-}
-
-// ResolveEscalation marks an escalation as resolved and unblocks the objective if all are answered.
-// Also resolves any duplicate pending escalations with the same question text.
-func (s *ObjectiveStore) ResolveEscalation(ctx context.Context, escID, resolution string) (*Escalation, error) {
-	var esc Escalation
-	if err := s.db.Table(Escalation{}).Get(ctx, escID, &esc); err != nil {
-		return nil, fmt.Errorf("escalation not found: %s", escID)
-	}
-	if s.companyID != "" {
-		if _, err := s.Get(ctx, esc.ObjectiveID); err != nil {
-			return nil, fmt.Errorf("escalation not found: %s", escID)
-		}
-	}
-
-	now := time.Now().UTC()
-	esc.Status = EscalationResolved
-	esc.Resolution = resolution
-	esc.ResolvedAt = now
-
-	if err := s.db.Table(Escalation{}).Update(ctx, &esc); err != nil {
-		return nil, err
-	}
-
-	// Auto-resolve duplicate pending escalations with the same question
-	dupes, _ := s.db.Table(Escalation{}).Query(ctx, gowild_data.QueryOpts{
-		Where: map[string]any{"objective_id": esc.ObjectiveID, "status": string(EscalationPending)},
-	})
-	for _, r := range dupes {
-		if dupe, ok := r.(*Escalation); ok && dupe.Question == esc.Question && dupe.ID != esc.ID {
-			dupe.Status = EscalationResolved
-			dupe.Resolution = resolution
-			dupe.ResolvedAt = now
-			s.db.Table(Escalation{}).Update(ctx, dupe)
-		}
-	}
-
-	// If all escalations for this objective are resolved, unblock it
-	remaining, _ := s.db.Table(Escalation{}).Query(ctx, gowild_data.QueryOpts{
-		Where: map[string]any{"objective_id": esc.ObjectiveID, "status": string(EscalationPending)},
-		Limit: 1,
-	})
-	if len(remaining) == 0 {
-		obj, err := s.Get(ctx, esc.ObjectiveID)
-		if err == nil && obj.Status == StatusBlocked {
-			obj.Status = StatusPending
-			obj.CooldownUntil = time.Time{}
-			s.Update(ctx, obj)
-		}
-	}
-
-	return &esc, nil
-}
-
 func toObjectives(results []any) []*Objective {
 	objs := make([]*Objective, 0, len(results))
 	for _, r := range results {
@@ -509,23 +371,3 @@ func isUUID(s string) bool {
 	_, err := uuid.Parse(s)
 	return err == nil
 }
-
-// GetByScheduleType returns all objectives with the given schedule type.
-func (s *ObjectiveStore) GetByScheduleType(ctx context.Context, schedType ScheduleType) ([]*Objective, error) {
-	where := map[string]any{"schedule_type": string(schedType)}
-	if s.companyID != "" {
-		where["company_id"] = s.companyID
-	}
-	results, err := s.db.Table(Objective{}).Query(ctx, gowild_data.QueryOpts{
-		Where: where,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("get by schedule type %s: %w", schedType, err)
-	}
-	return toObjectives(results), nil
-}
-
-// DB exposes the underlying database handle. The scheduler in
-// objectives_planner queries escalations directly; before the module split
-// that was a private field access inside the package.
-func (s *ObjectiveStore) DB() gowild_data.Database { return s.db }

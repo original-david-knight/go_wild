@@ -196,7 +196,3 @@ func toEvents(results []any) []*ActivityEvent {
 	}
 	return events
 }
-
-// DB exposes the underlying database handle, for the same reason
-// ObjectiveStore.DB does.
-func (a *ActivityStore) DB() gowild_data.Database { return a.db }

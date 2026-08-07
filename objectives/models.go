@@ -16,44 +16,22 @@ const (
 	StatusPaused    ObjectiveStatus = "paused"
 )
 
-// AutonomyLevel controls how much human oversight an objective requires.
-type AutonomyLevel string
-
-const (
-	AutonomyFull           AutonomyLevel = "full"
-	AutonomyApprovePlan    AutonomyLevel = "approve_plan"
-	AutonomyApproveActions AutonomyLevel = "approve_actions"
-)
-
-// ScheduleType describes how an objective is triggered.
-type ScheduleType string
-
-const (
-	ScheduleOneShot    ScheduleType = "one_shot"
-	ScheduleCron       ScheduleType = "cron"
-	ScheduleEvent      ScheduleType = "event"
-	ScheduleContinuous ScheduleType = "continuous"
-)
-
-// Objective is a node in the objective tree. It represents a goal at any
-// level of abstraction, from a high-level mission down to a concrete task.
+// Objective is a node in the objective tree. It carries identity, tree
+// position, content, lifecycle and measurable progress — and nothing about how
+// some agent would pursue it. The mission-planner fields (schedule, tool
+// allowlist, autonomy level, cooldown, last result) left the node with the
+// planner they served; their Postgres columns are orphaned and inert, because
+// the data/ migrations are additive-only.
 type Objective struct {
-	ID            string          `json:"id"`
-	CompanyID     string          `json:"company_id"`
-	ParentID      string          `json:"parent_id"`
-	Title         string          `json:"title"`
-	Description   string          `json:"description"`
-	Status        ObjectiveStatus `json:"status"`
-	Priority      int             `json:"priority"`
-	Depth         int             `json:"depth"`
-	ScheduleType  ScheduleType    `json:"schedule_type"`
-	ScheduleCron  string          `json:"schedule_cron"`
-	ScheduleEvent string          `json:"schedule_event"`
-	ToolAllowlist []string        `json:"tool_allowlist"`
-	AutonomyLevel AutonomyLevel   `json:"autonomy_level"`
-	Deadline      time.Time       `json:"deadline"`
-	CooldownUntil time.Time       `json:"cooldown_until"`
-	LastResult    string          `json:"last_result"`
+	ID          string          `json:"id"`
+	CompanyID   string          `json:"company_id"`
+	ParentID    string          `json:"parent_id"`
+	Title       string          `json:"title"`
+	Description string          `json:"description"`
+	Status      ObjectiveStatus `json:"status"`
+	Priority    int             `json:"priority"`
+	Depth       int             `json:"depth"`
+	Deadline    time.Time       `json:"deadline"`
 	// Target/Current/Unit carry measurable progress: "198 → 180 lb" is a
 	// Target of 180, a Current of 197.4 and a Unit of "lb". Objectives with
 	// no measurable target leave them zero and report progress another way.
@@ -87,27 +65,6 @@ type ActivityEvent struct {
 	CreatedAt   time.Time      `json:"created_at"`
 }
 
-// EscalationStatus tracks the state of a human escalation request.
-type EscalationStatus string
-
-const (
-	EscalationPending  EscalationStatus = "pending"
-	EscalationResolved EscalationStatus = "resolved"
-)
-
-// Escalation represents a request for human help.
-type Escalation struct {
-	ID          string           `json:"id"`
-	ObjectiveID string           `json:"objective_id"`
-	Question    string           `json:"question"`
-	Context     string           `json:"context"`
-	Severity    EventSeverity    `json:"severity"`
-	Status      EscalationStatus `json:"status"`
-	Resolution  string           `json:"resolution"`
-	CreatedAt   time.Time        `json:"created_at"`
-	ResolvedAt  time.Time        `json:"resolved_at"`
-}
-
 // MutationAction describes what kind of tree modification to apply.
 type MutationAction string
 
@@ -120,14 +77,11 @@ const (
 
 // TreeMutation describes a single modification to the objective tree.
 type TreeMutation struct {
-	Action        MutationAction  `json:"action"`
-	ObjectiveID   string          `json:"objective_id,omitempty"` // for update/remove/move
-	ParentID      string          `json:"parent_id,omitempty"`    // for add/move
-	Title         string          `json:"title,omitempty"`
-	Description   string          `json:"description,omitempty"`
-	Status        ObjectiveStatus `json:"status,omitempty"`
-	Priority      int             `json:"priority,omitempty"`
-	ScheduleType  ScheduleType    `json:"schedule_type,omitempty"`
-	ScheduleCron  string          `json:"schedule_cron,omitempty"`
-	ToolAllowlist []string        `json:"tool_allowlist,omitempty"`
+	Action      MutationAction  `json:"action"`
+	ObjectiveID string          `json:"objective_id,omitempty"` // for update/remove/move
+	ParentID    string          `json:"parent_id,omitempty"`    // for add/move
+	Title       string          `json:"title,omitempty"`
+	Description string          `json:"description,omitempty"`
+	Status      ObjectiveStatus `json:"status,omitempty"`
+	Priority    int             `json:"priority,omitempty"`
 }
