@@ -21,7 +21,7 @@ func GetObjectiveStatus(ctx context.Context, store *ObjectiveStore, activity *Ac
 		return nil, err
 	}
 
-	children, err := store.GetChildren(ctx, obj.ID)
+	children, err := store.children(ctx, obj.ID)
 	if err != nil {
 		return nil, err
 	}

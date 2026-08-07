@@ -17,19 +17,19 @@ func TestGetObjectiveStatus(t *testing.T) {
 	ctx := context.Background()
 
 	root := &Objective{Title: "Ship app #2"}
-	if err := store.Create(ctx, root); err != nil {
+	if err := store.CreateObjective(ctx, root); err != nil {
 		t.Fatalf("create root: %v", err)
 	}
 
-	children := []*Objective{
-		{Title: "Beta users", ParentID: root.ID, Status: StatusCompleted},
-		{Title: "Store listing", ParentID: root.ID, Status: StatusFailed},
-		{Title: "Crash-free rate", ParentID: root.ID, Status: StatusActive},
-		{Title: "Pricing page", ParentID: root.ID, Status: StatusPending},
+	keyResults := []*Objective{
+		{Title: "Beta users", Status: StatusCompleted},
+		{Title: "Store listing", Status: StatusFailed},
+		{Title: "Crash-free rate", Status: StatusActive},
+		{Title: "Pricing page", Status: StatusPending},
 	}
-	for _, c := range children {
-		if err := store.Create(ctx, c); err != nil {
-			t.Fatalf("create child %q: %v", c.Title, err)
+	for _, kr := range keyResults {
+		if err := store.CreateKeyResult(ctx, root.ID, kr); err != nil {
+			t.Fatalf("create key result %q: %v", kr.Title, err)
 		}
 	}
 
@@ -45,7 +45,7 @@ func TestGetObjectiveStatus(t *testing.T) {
 		t.Fatalf("expected rollup for %s, got %s", root.ID, rollup.Objective.ID)
 	}
 	if rollup.ChildCount != 4 {
-		t.Fatalf("expected 4 children, got %d", rollup.ChildCount)
+		t.Fatalf("expected 4 key results, got %d", rollup.ChildCount)
 	}
 	if rollup.CompletedCount != 1 || rollup.FailedCount != 1 || rollup.ActiveCount != 1 {
 		t.Fatalf("expected 1/1/1 completed/failed/active, got %d/%d/%d",
@@ -63,12 +63,12 @@ func TestGetTreeStatus(t *testing.T) {
 	ctx := context.Background()
 
 	root := &Objective{Title: "Root"}
-	if err := store.Create(ctx, root); err != nil {
+	if err := store.CreateObjective(ctx, root); err != nil {
 		t.Fatalf("create root: %v", err)
 	}
-	child := &Objective{Title: "Child", ParentID: root.ID, Status: StatusCompleted}
-	if err := store.Create(ctx, child); err != nil {
-		t.Fatalf("create child: %v", err)
+	child := &Objective{Title: "Child", Status: StatusCompleted}
+	if err := store.CreateKeyResult(ctx, root.ID, child); err != nil {
+		t.Fatalf("create key result: %v", err)
 	}
 
 	rollups, err := GetTreeStatus(ctx, store, activity, root.ID)
@@ -78,15 +78,15 @@ func TestGetTreeStatus(t *testing.T) {
 	if len(rollups) != 2 {
 		t.Fatalf("expected a rollup per node, got %d", len(rollups))
 	}
-	// BFS order: the root first, then its child.
+	// BFS order: the objective first, then its key result.
 	if rollups[0].Objective.ID != root.ID || rollups[1].Objective.ID != child.ID {
-		t.Fatalf("expected root then child, got %s then %s",
+		t.Fatalf("expected objective then key result, got %s then %s",
 			rollups[0].Objective.ID, rollups[1].Objective.ID)
 	}
 	if rollups[0].CompletedCount != 1 {
-		t.Fatalf("expected the root to count its completed child, got %d", rollups[0].CompletedCount)
+		t.Fatalf("expected the objective to count its completed key result, got %d", rollups[0].CompletedCount)
 	}
 	if rollups[1].ChildCount != 0 {
-		t.Fatalf("expected the leaf to have no children, got %d", rollups[1].ChildCount)
+		t.Fatalf("expected the key result to hold nothing, got %d", rollups[1].ChildCount)
 	}
 }

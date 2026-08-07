@@ -31,7 +31,7 @@ func TestObjectiveStore_CRUD(t *testing.T) {
 		Description: "A test mission",
 		Priority:    1,
 	}
-	if err := store.Create(ctx, obj); err != nil {
+	if err := store.CreateObjective(ctx, obj); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if obj.ID == "" {
@@ -79,38 +79,50 @@ func TestObjectiveStore_TreeOps(t *testing.T) {
 	store := NewObjectiveStore(db, "")
 	ctx := context.Background()
 
-	// Create a tree: root -> child1, child2 -> grandchild
+	// The tree is two levels: one Objective, two Key Results under it, and a
+	// second Objective whose key result must never turn up under the first.
 	root := &Objective{Title: "Root", Priority: 1}
-	store.Create(ctx, root)
+	store.CreateObjective(ctx, root)
 
-	child1 := &Objective{Title: "Child 1", ParentID: root.ID, Priority: 1, Depth: 1}
-	store.Create(ctx, child1)
+	kr1 := &Objective{Title: "KR 1", Priority: 1}
+	store.CreateKeyResult(ctx, root.ID, kr1)
 
-	child2 := &Objective{Title: "Child 2", ParentID: root.ID, Priority: 2, Depth: 1}
-	store.Create(ctx, child2)
+	kr2 := &Objective{Title: "KR 2", Priority: 2}
+	store.CreateKeyResult(ctx, root.ID, kr2)
 
-	grandchild := &Objective{Title: "Grandchild", ParentID: child1.ID, Priority: 1, Depth: 2}
-	store.Create(ctx, grandchild)
+	other := &Objective{Title: "Other root", Priority: 2}
+	store.CreateObjective(ctx, other)
+	otherKR := &Objective{Title: "A KR of the other objective", Priority: 1}
+	store.CreateKeyResult(ctx, other.ID, otherKR)
 
-	// GetRoots
-	roots, err := store.GetRoots(ctx)
+	roots, err := store.GetObjectives(ctx)
 	if err != nil {
-		t.Fatalf("get roots: %v", err)
+		t.Fatalf("get objectives: %v", err)
 	}
-	if len(roots) != 1 {
-		t.Fatalf("expected 1 root, got %d", len(roots))
+	if len(roots) != 2 {
+		t.Fatalf("expected 2 objectives, got %d", len(roots))
 	}
 	if roots[0].Title != "Root" {
-		t.Fatalf("expected root title 'Root', got %q", roots[0].Title)
+		t.Fatalf("expected first objective 'Root', got %q", roots[0].Title)
 	}
 
-	// GetChildren
-	children, err := store.GetChildren(ctx, root.ID)
+	krs, err := store.GetKeyResults(ctx, root.ID)
 	if err != nil {
-		t.Fatalf("get children: %v", err)
+		t.Fatalf("get key results: %v", err)
 	}
-	if len(children) != 2 {
-		t.Fatalf("expected 2 children, got %d", len(children))
+	if len(krs) != 2 {
+		t.Fatalf("expected 2 key results, got %d", len(krs))
+	}
+	for _, kr := range krs {
+		if kr.ParentID != root.ID {
+			t.Fatalf("key result %q hangs off %s, want %s", kr.Title, kr.ParentID, root.ID)
+		}
+		if kr.Depth != 1 {
+			t.Fatalf("key result %q sits at depth %d, want 1", kr.Title, kr.Depth)
+		}
+		if kr.Title == otherKR.Title {
+			t.Fatal("a sibling objective's key result came back with this one's")
+		}
 	}
 
 	// GetTree (BFS)
@@ -118,20 +130,18 @@ func TestObjectiveStore_TreeOps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get tree: %v", err)
 	}
-	if len(tree) != 4 {
-		t.Fatalf("expected 4 nodes in tree, got %d", len(tree))
+	if len(tree) != 3 {
+		t.Fatalf("expected 3 nodes in tree, got %d", len(tree))
 	}
-	// BFS order: root, child1, child2, grandchild
 	if tree[0].Title != "Root" {
 		t.Fatalf("expected first node to be Root, got %q", tree[0].Title)
 	}
 
-	// GetLeafTasks
+	// GetLeafTasks: both key results are leaves and pending.
 	leaves, err := store.GetLeafTasks(ctx, root.ID)
 	if err != nil {
 		t.Fatalf("get leaves: %v", err)
 	}
-	// child2 and grandchild are leaves (no children, pending status)
 	if len(leaves) != 2 {
 		t.Fatalf("expected 2 leaf tasks, got %d", len(leaves))
 	}
@@ -142,11 +152,11 @@ func TestObjectiveStore_GetByStatus(t *testing.T) {
 	store := NewObjectiveStore(db, "")
 	ctx := context.Background()
 
-	store.Create(ctx, &Objective{Title: "Pending 1"})
-	store.Create(ctx, &Objective{Title: "Pending 2"})
+	store.CreateObjective(ctx, &Objective{Title: "Pending 1"})
+	store.CreateObjective(ctx, &Objective{Title: "Pending 2"})
 
 	active := &Objective{Title: "Active 1"}
-	store.Create(ctx, active)
+	store.CreateObjective(ctx, active)
 	active.Status = StatusActive
 	store.Update(ctx, active)
 
@@ -174,7 +184,7 @@ func TestObjectiveStore_ApplyMutations(t *testing.T) {
 
 	// Create a root first
 	root := &Objective{Title: "Root"}
-	store.Create(ctx, root)
+	store.CreateObjective(ctx, root)
 
 	// Apply add mutations
 	mutations := []TreeMutation{
@@ -198,9 +208,9 @@ func TestObjectiveStore_ApplyMutations(t *testing.T) {
 		t.Fatalf("apply mutations: %v", err)
 	}
 
-	children, err := store.GetChildren(ctx, root.ID)
+	children, err := store.GetKeyResults(ctx, root.ID)
 	if err != nil {
-		t.Fatalf("get children: %v", err)
+		t.Fatalf("get key results: %v", err)
 	}
 	if len(children) != 2 {
 		t.Fatalf("expected 2 children, got %d", len(children))
@@ -243,7 +253,7 @@ func TestObjectiveStore_ApplyMutations(t *testing.T) {
 		t.Fatalf("apply remove: %v", err)
 	}
 
-	remaining, _ := store.GetChildren(ctx, root.ID)
+	remaining, _ := store.GetKeyResults(ctx, root.ID)
 	if len(remaining) != 1 {
 		t.Fatalf("expected 1 child after remove, got %d", len(remaining))
 	}
@@ -301,7 +311,7 @@ func TestObjectiveStore_CompanyScopeIsolation(t *testing.T) {
 	globalStore := NewObjectiveStore(db, "")
 
 	rootA := &Objective{Title: "Mission A"}
-	if err := storeA.Create(ctx, rootA); err != nil {
+	if err := storeA.CreateObjective(ctx, rootA); err != nil {
 		t.Fatalf("create rootA: %v", err)
 	}
 	if rootA.CompanyID != "company-a" {
@@ -309,7 +319,7 @@ func TestObjectiveStore_CompanyScopeIsolation(t *testing.T) {
 	}
 
 	rootB := &Objective{Title: "Mission B"}
-	if err := storeB.Create(ctx, rootB); err != nil {
+	if err := storeB.CreateObjective(ctx, rootB); err != nil {
 		t.Fatalf("create rootB: %v", err)
 	}
 	if rootB.CompanyID != "company-b" {
@@ -342,11 +352,11 @@ func TestActivityStore_CompanyScopeIsolation(t *testing.T) {
 	storeB := NewObjectiveStore(db, "company-b")
 
 	objA := &Objective{Title: "Mission A"}
-	if err := storeA.Create(ctx, objA); err != nil {
+	if err := storeA.CreateObjective(ctx, objA); err != nil {
 		t.Fatalf("create objA: %v", err)
 	}
 	objB := &Objective{Title: "Mission B"}
-	if err := storeB.Create(ctx, objB); err != nil {
+	if err := storeB.CreateObjective(ctx, objB); err != nil {
 		t.Fatalf("create objB: %v", err)
 	}
 

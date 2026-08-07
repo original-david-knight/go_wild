@@ -9,21 +9,36 @@ import (
 // module, and they are plain scalars that a careless model or column change
 // would silently drop. They get their own round-trip test rather than riding
 // along on TestObjectiveStore_CRUD.
+//
+// They live on Key Results now: measurement happens at exactly one level, and
+// the Objective above is a container. Each case below hangs its measured node
+// under a container of its own for that reason.
 
-func TestObjectiveStore_ProgressFieldsRoundTrip(t *testing.T) {
+// measuredKR creates a container Objective and one Key Result under it,
+// returning the key result the case then round-trips.
+func measuredKR(t *testing.T, ctx context.Context, store *ObjectiveStore, kr *Objective) *Objective {
+	t.Helper()
+	parent := &Objective{Title: kr.Title + " — container"}
+	if err := store.CreateObjective(ctx, parent); err != nil {
+		t.Fatalf("create container: %v", err)
+	}
+	if err := store.CreateKeyResult(ctx, parent.ID, kr); err != nil {
+		t.Fatalf("create key result: %v", err)
+	}
+	return kr
+}
+
+func TestKeyResultStore_ProgressFieldsRoundTrip(t *testing.T) {
 	db := setupTestDB(t)
 	store := NewObjectiveStore(db, "")
 	ctx := context.Background()
 
-	obj := &Objective{
+	obj := measuredKR(t, ctx, store, &Objective{
 		Title:   "Weight 198 to 180",
 		Target:  180,
 		Current: 197.4,
 		Unit:    "lb",
-	}
-	if err := store.Create(ctx, obj); err != nil {
-		t.Fatalf("create: %v", err)
-	}
+	})
 
 	got, err := store.Get(ctx, obj.ID)
 	if err != nil {
@@ -60,18 +75,15 @@ func TestObjectiveStore_ProgressFieldsRoundTrip(t *testing.T) {
 	}
 }
 
-func TestObjectiveStore_ProgressFieldsZeroValues(t *testing.T) {
+func TestKeyResultStore_ProgressFieldsZeroValues(t *testing.T) {
 	db := setupTestDB(t)
 	store := NewObjectiveStore(db, "")
 	ctx := context.Background()
 
-	// An objective with no measurable target leaves the progress fields zero.
-	// Reading them back as anything other than 0/0/"" would let a consumer
-	// render a fabricated number.
-	obj := &Objective{Title: "Ship app #2 to the store"}
-	if err := store.Create(ctx, obj); err != nil {
-		t.Fatalf("create: %v", err)
-	}
+	// A key result backed by tasks rather than a number leaves the progress
+	// fields zero. Reading them back as anything other than 0/0/"" would let a
+	// consumer render a fabricated number.
+	obj := measuredKR(t, ctx, store, &Objective{Title: "Ship app #2 to the store"})
 
 	got, err := store.Get(ctx, obj.ID)
 	if err != nil {
@@ -112,7 +124,7 @@ func TestObjectiveStore_ProgressFieldsZeroValues(t *testing.T) {
 	}
 }
 
-func TestObjectiveStore_ProgressFieldsNegativeDelta(t *testing.T) {
+func TestKeyResultStore_ProgressFieldsNegativeDelta(t *testing.T) {
 	db := setupTestDB(t)
 	store := NewObjectiveStore(db, "")
 	ctx := context.Background()
@@ -120,15 +132,12 @@ func TestObjectiveStore_ProgressFieldsNegativeDelta(t *testing.T) {
 	// Progress is not always upward and not always positive: a savings gap
 	// starts below zero and closes toward a target. Both the negative stored
 	// value and the downward step have to survive the REAL column.
-	obj := &Objective{
+	obj := measuredKR(t, ctx, store, &Objective{
 		Title:   "Close the cash gap",
 		Target:  0,
 		Current: -1250.75,
 		Unit:    "usd",
-	}
-	if err := store.Create(ctx, obj); err != nil {
-		t.Fatalf("create: %v", err)
-	}
+	})
 
 	got, err := store.Get(ctx, obj.ID)
 	if err != nil {

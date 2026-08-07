@@ -2,6 +2,7 @@ package objectives
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,7 +10,35 @@ import (
 	"github.com/original-david-knight/go_wild/data"
 )
 
-// ObjectiveStore provides persistence operations for the objective tree.
+// The store refuses anything that is not an OKR tree, and each refusal is its
+// own sentinel so a consumer can name the reason — an HTTP layer answering 400,
+// say — with errors.Is rather than by re-walking the tree itself.
+var (
+	// ErrObjectiveParented rejects an Objective with a parent. Objectives are
+	// roots: a parented one is a Key Result that has not said so.
+	ErrObjectiveParented = errors.New("an objective is a root and cannot have a parent")
+	// ErrParentNotObjective rejects a key result whose named parent is not
+	// there at all.
+	ErrParentNotObjective = errors.New("a key result's parent must name an existing objective")
+	// ErrThirdLevel rejects a key result under a key result. Two levels
+	// exactly: a key result that needs sub-structure is an objective that has
+	// not admitted it yet.
+	ErrThirdLevel = errors.New("a key result cannot hold key results: the tree is two levels")
+	// ErrObjectiveMeasures rejects progress fields on an Objective. Measuring
+	// happens at exactly one level, and it is not this one.
+	ErrObjectiveMeasures = errors.New("an objective does not measure: target, current and unit belong on its key results")
+)
+
+// measures reports whether a node carries a measurable progress claim. Any one
+// of the three is enough: a unit with no numbers still states that something is
+// being counted.
+func measures(obj *Objective) bool {
+	return obj.Target != 0 || obj.Current != 0 || obj.Unit != ""
+}
+
+// ObjectiveStore provides persistence operations for the two-level OKR tree:
+// Objectives are its roots, Key Results are their children, and the structure
+// is enforced here rather than left to caller convention.
 type ObjectiveStore struct {
 	db        gowild_data.Database
 	companyID string
@@ -42,8 +71,47 @@ func (s *ObjectiveStore) addCompanyScope(where map[string]any) map[string]any {
 	return scoped
 }
 
-// Create inserts a new objective. ID and timestamps are set automatically.
-func (s *ObjectiveStore) Create(ctx context.Context, obj *Objective) error {
+// CreateObjective inserts a root Objective — a container that states a
+// direction and measures nothing itself. A parent or any progress field is a
+// contradiction and is refused.
+func (s *ObjectiveStore) CreateObjective(ctx context.Context, obj *Objective) error {
+	if obj == nil {
+		return fmt.Errorf("create objective: an objective is required")
+	}
+	if obj.ParentID != "" {
+		return fmt.Errorf("create objective %q: %w", obj.Title, ErrObjectiveParented)
+	}
+	if measures(obj) {
+		return fmt.Errorf("create objective %q: %w", obj.Title, ErrObjectiveMeasures)
+	}
+	obj.Depth = 0
+	return s.create(ctx, obj)
+}
+
+// CreateKeyResult inserts a Key Result under the named Objective. The caller
+// names the parent; the store sets ParentID and Depth, so tree position stops
+// being the caller's problem — and stops being something the caller can get
+// wrong.
+func (s *ObjectiveStore) CreateKeyResult(ctx context.Context, objectiveID string, kr *Objective) error {
+	if kr == nil {
+		return fmt.Errorf("create key result: a key result is required")
+	}
+	parent, err := s.Get(ctx, objectiveID)
+	if err != nil {
+		return fmt.Errorf("create key result %q: %w", kr.Title, ErrParentNotObjective)
+	}
+	if parent.ParentID != "" {
+		return fmt.Errorf("create key result %q under %s: %w", kr.Title, objectiveID, ErrThirdLevel)
+	}
+	kr.ParentID = parent.ID
+	kr.Depth = parent.Depth + 1
+	return s.create(ctx, kr)
+}
+
+// create inserts a node. ID and timestamps are set automatically. It is the
+// shared tail of both public creates and of ApplyMutations, and it enforces
+// nothing: the structure was decided by the caller above it.
+func (s *ObjectiveStore) create(ctx context.Context, obj *Objective) error {
 	now := time.Now().UTC()
 	if obj.ID == "" {
 		obj.ID = uuid.New().String()
@@ -84,7 +152,11 @@ func (s *ObjectiveStore) Get(ctx context.Context, id string) (*Objective, error)
 	return &obj, nil
 }
 
-// Update persists changes to an existing objective.
+// Update persists changes to an existing node, Objective or Key Result, and
+// holds the shape rules the creates hold. Enforcing them here too is the whole
+// point: without it an Objective could be edited into measuring, or a Key
+// Result re-parented under another one, and the tree would be two levels only
+// until someone typed a PATCH.
 func (s *ObjectiveStore) Update(ctx context.Context, obj *Objective) error {
 	if obj == nil || obj.ID == "" {
 		return fmt.Errorf("update objective: id is required")
@@ -98,10 +170,18 @@ func (s *ObjectiveStore) Update(ctx context.Context, obj *Objective) error {
 	} else if obj.CompanyID == "" {
 		obj.CompanyID = current.CompanyID
 	}
-	if obj.ParentID != "" {
+	if obj.ParentID == "" {
+		if measures(obj) {
+			return fmt.Errorf("update objective %s: %w", obj.ID, ErrObjectiveMeasures)
+		}
+		obj.Depth = 0
+	} else {
 		parent, err := s.Get(ctx, obj.ParentID)
 		if err != nil {
-			return fmt.Errorf("update objective %s: parent %s not found: %w", obj.ID, obj.ParentID, err)
+			return fmt.Errorf("update objective %s: %w", obj.ID, ErrParentNotObjective)
+		}
+		if parent.ParentID != "" {
+			return fmt.Errorf("update objective %s under %s: %w", obj.ID, obj.ParentID, ErrThirdLevel)
 		}
 		if obj.CompanyID != parent.CompanyID {
 			return fmt.Errorf("update objective %s: parent %s belongs to a different company", obj.ID, obj.ParentID)
@@ -140,8 +220,16 @@ func (s *ObjectiveStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// GetChildren returns the direct children of the given objective.
-func (s *ObjectiveStore) GetChildren(ctx context.Context, parentID string) ([]*Objective, error) {
+// GetKeyResults returns the Key Results of the named Objective, and nothing
+// from any other one.
+func (s *ObjectiveStore) GetKeyResults(ctx context.Context, objectiveID string) ([]*Objective, error) {
+	return s.children(ctx, objectiveID)
+}
+
+// children returns the direct children of a node. It stays unexported: the
+// public surface speaks Objectives and Key Results, and generic tree
+// traversal is this package's own business.
+func (s *ObjectiveStore) children(ctx context.Context, parentID string) ([]*Objective, error) {
 	results, err := s.db.Table(Objective{}).Query(ctx, gowild_data.QueryOpts{
 		Where:   s.addCompanyScope(map[string]any{"parent_id": parentID}),
 		OrderBy: "priority",
@@ -152,15 +240,15 @@ func (s *ObjectiveStore) GetChildren(ctx context.Context, parentID string) ([]*O
 	return toObjectives(results), nil
 }
 
-// GetRoots returns all root objectives (those with no parent).
-func (s *ObjectiveStore) GetRoots(ctx context.Context) ([]*Objective, error) {
+// GetObjectives returns every Objective — the tree's roots.
+func (s *ObjectiveStore) GetObjectives(ctx context.Context) ([]*Objective, error) {
 	where := s.addCompanyScope(map[string]any{"parent_id": ""})
 	results, err := s.db.Table(Objective{}).Query(ctx, gowild_data.QueryOpts{
 		Where:   where,
 		OrderBy: "priority",
 	})
 	if err != nil {
-		return nil, fmt.Errorf("get roots: %w", err)
+		return nil, fmt.Errorf("get objectives: %w", err)
 	}
 	return toObjectives(results), nil
 }
@@ -193,7 +281,7 @@ func (s *ObjectiveStore) GetTree(ctx context.Context, rootID string) ([]*Objecti
 		queue = queue[1:]
 		tree = append(tree, node)
 
-		children, err := s.GetChildren(ctx, node.ID)
+		children, err := s.children(ctx, node.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -277,7 +365,7 @@ func (s *ObjectiveStore) ApplyMutations(ctx context.Context, mutations []TreeMut
 						obj.CompanyID = parent.CompanyID
 					}
 				}
-				if err := txStore.Create(ctx, obj); err != nil {
+				if err := txStore.create(ctx, obj); err != nil {
 					return fmt.Errorf("add mutation: %w", err)
 				}
 				// Store the generated ID back into the mutation for reference
