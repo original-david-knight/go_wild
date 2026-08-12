@@ -162,3 +162,53 @@ func TestLastNDaysIsOldestFirstEndingToday(t *testing.T) {
 		t.Fatalf("window ends on %q, want today %q", got[len(got)-1], c.Today())
 	}
 }
+
+func TestDaysFromStopsAtToday(t *testing.T) {
+	t.Setenv(testNowEnv, time.Date(2026, 8, 2, 8, 30, 0, 0, time.Local).Format(time.RFC3339))
+	c := testClock()
+
+	cases := []struct {
+		name  string
+		start string
+		n     int
+		want  []string
+	}{
+		{
+			// The window crosses a month boundary, which is where naive string
+			// arithmetic on day keys breaks.
+			name:  "a window still running is elapsed up to today",
+			start: "2026-07-30",
+			n:     7,
+			want:  []string{"2026-07-30", "2026-07-31", "2026-08-01", "2026-08-02"},
+		},
+		{
+			name:  "a window already over is its whole length",
+			start: "2026-07-28",
+			n:     3,
+			want:  []string{"2026-07-28", "2026-07-29", "2026-07-30"},
+		},
+		{
+			name:  "a window starting today holds today alone",
+			start: "2026-08-02",
+			n:     366,
+			want:  []string{"2026-08-02"},
+		},
+		{name: "a window not yet begun has elapsed nothing", start: "2026-08-03", n: 7},
+		{name: "an unparseable start is no window", start: "not-a-day", n: 7},
+		{name: "a window of no days is no window", start: "2026-07-30", n: 0},
+	}
+
+	for _, c2 := range cases {
+		t.Run(c2.name, func(t *testing.T) {
+			got := c.DaysFrom(c2.start, c2.n)
+			if len(got) != len(c2.want) {
+				t.Fatalf("DaysFrom(%q, %d) = %v, want %v", c2.start, c2.n, got, c2.want)
+			}
+			for i := range c2.want {
+				if got[i] != c2.want[i] {
+					t.Fatalf("DaysFrom(%q, %d) = %v, want %v", c2.start, c2.n, got, c2.want)
+				}
+			}
+		})
+	}
+}

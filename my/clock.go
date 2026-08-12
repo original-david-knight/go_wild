@@ -126,3 +126,29 @@ func (c Clock) LastNDays(n int) []string {
 	}
 	return days
 }
+
+// DaysFrom returns the day keys of an n-day window that begins on start,
+// oldest first, stopping at today — the elapsed part of a window pinned to a
+// fixed day rather than trailing the present. A window whose start is still in
+// the future has no elapsed days and yields none, as does an unparseable start.
+//
+// It is LastNDays' counterpart: that one asks "the last n days", this one asks
+// "the n days from here, so far".
+func (c Clock) DaysFrom(start string, n int) []string {
+	from, err := ParseDay(start)
+	if err != nil || n <= 0 {
+		return nil
+	}
+	// Day keys are zero-padded, so lexical order is chronological order and
+	// the comparison needs no second parse.
+	today := DayKey(c.Now())
+	days := make([]string, 0, n)
+	for i := range n {
+		day := DayKey(from.AddDate(0, 0, i))
+		if day > today {
+			break
+		}
+		days = append(days, day)
+	}
+	return days
+}
