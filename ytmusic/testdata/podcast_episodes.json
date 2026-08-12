@@ -1,0 +1,445 @@
+{
+ "contents": {
+  "twoColumnBrowseResultsRenderer": {
+   "tabs": [
+    {
+     "tabRenderer": {
+      "content": {
+       "sectionListRenderer": {
+        "contents": [
+         {
+          "musicResponsiveHeaderRenderer": {
+           "title": {
+            "runs": [
+             {
+              "text": "The Daily"
+             }
+            ]
+           },
+           "subtitle": {},
+           "straplineTextOne": {
+            "runs": [
+             {
+              "text": "New York Times Podcasts",
+              "navigationEndpoint": {
+               "browseEndpoint": {
+                "browseId": "UCkdnY2hNC0sdlVXPtWuNQ8g",
+                "browseEndpointContextSupportedConfigs": {
+                 "browseEndpointContextMusicConfig": {
+                  "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"
+                 }
+                }
+               }
+              }
+             }
+            ]
+           },
+           "thumbnail": {
+            "musicThumbnailRenderer": {
+             "thumbnail": {
+              "thumbnails": [
+               {
+                "url": "https://i.ytimg.com/podcasts_artwork/PLdMrbgYfVl-s16D_iT2BJCJ90pWtTO1A4/rss_feed_ingested.jpg?sqp=CP3E8tMG-oaymwEICDwQPCAASFo&rs=AMzJL3nN0Q5VIIkQGD-MieDLxSd4R7gDgg",
+                "width": 60,
+                "height": 60
+               },
+               {
+                "url": "https://i.ytimg.com/podcasts_artwork/PLdMrbgYfVl-s16D_iT2BJCJ90pWtTO1A4/rss_feed_ingested.jpg?sqp=CP3E8tMG-oaymwEKCKAEEKAEIABIWg&rs=AMzJL3nUN_reeSxRYKjXpEJ0lRTcpfLe8A",
+                "width": 544,
+                "height": 544
+               }
+              ]
+             }
+            }
+           },
+           "description": {
+            "musicDescriptionShelfRenderer": {
+             "header": {
+              "runs": [
+               {
+                "text": "The Daily"
+               }
+              ]
+             },
+             "description": {
+              "runs": [
+               {
+                "text": "This is how the news should sound. Twenty minutes a day, six days a week. Hosted by Michael Barbaro, Rachel Abrams and Natalie Kitroeff, and powered by New York Times journalism."
+               }
+              ]
+             },
+             "moreButton": {
+              "toggleButtonRenderer": {
+               "isToggled": false,
+               "isDisabled": false,
+               "defaultIcon": {
+                "iconType": "EXPAND"
+               },
+               "defaultText": {
+                "runs": [
+                 {
+                  "text": "More"
+                 }
+                ]
+               },
+               "toggledIcon": {
+                "iconType": "COLLAPSE"
+               },
+               "toggledText": {
+                "runs": [
+                 {
+                  "text": "Less"
+                 }
+                ]
+               }
+              }
+             },
+             "shelfStyle": "MUSIC_SHELF_STYLE_OPEN_DIALOG_ON_CLICK"
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   ],
+   "secondaryContents": {
+    "sectionListRenderer": {
+     "contents": [
+      {
+       "musicShelfRenderer": {
+        "contents": [
+         {
+          "musicMultiRowListItemRenderer": {
+           "thumbnail": {
+            "musicThumbnailRenderer": {
+             "thumbnail": {
+              "thumbnails": [
+               {
+                "url": "https://i.ytimg.com/vi/YVr6_FPheV0/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kcDuu7y_Q3hc2AB0pDBBZwq7QRYg",
+                "width": 400,
+                "height": 225
+               },
+               {
+                "url": "https://i.ytimg.com/vi/YVr6_FPheV0/sddefault.jpg?sqp=-oaymwEWCIAFEOgCIAQqCggAEIAFGDwgpANIWg&rs=AMzJL3mHAjuU_5YRfQ5i6LuvssEq2z1-ug",
+                "width": 640,
+                "height": 360
+               }
+              ]
+             }
+            }
+           },
+           "onTap": {
+            "watchEndpoint": {
+             "videoId": "YVr6_FPheV0"
+            }
+           },
+           "title": {
+            "runs": [
+             {
+              "text": "All the President’s Planes",
+              "navigationEndpoint": {
+               "browseEndpoint": {
+                "browseId": "MPEDYVr6_FPheV0",
+                "browseEndpointContextSupportedConfigs": {
+                 "browseEndpointContextMusicConfig": {
+                  "pageType": "MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE"
+                 }
+                }
+               }
+              }
+             }
+            ]
+           },
+           "subtitle": {
+            "runs": [
+             {
+              "text": "4.3K views"
+             },
+             {
+              "text": " • "
+             },
+             {
+              "text": "2h ago"
+             }
+            ]
+           },
+           "description": {
+            "runs": [
+             {
+              "text": "When President Trump left Turkey, the White House said publicly that he was boarding the old Air Force One — but that plane was a decoy. In a highly elaborate e"
+             }
+            ]
+           },
+           "playbackProgress": {
+            "musicPlaybackProgressRenderer": {
+             "playbackProgressPercentage": 0,
+             "durationText": {
+              "runs": [
+               {
+                "text": " • "
+               },
+               {
+                "text": "23 min"
+               }
+              ]
+             }
+            }
+           }
+          }
+         },
+         {
+          "musicMultiRowListItemRenderer": {
+           "thumbnail": {
+            "musicThumbnailRenderer": {
+             "thumbnail": {
+              "thumbnails": [
+               {
+                "url": "https://i.ytimg.com/vi/D8k4Bx_LC7c/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kAjrAOCKcCAki_U6cB-_rcoXErEQ",
+                "width": 400,
+                "height": 225
+               },
+               {
+                "url": "https://i.ytimg.com/vi/D8k4Bx_LC7c/sddefault.jpg?sqp=-oaymwEWCIAFEOgCIAQqCggAEIAFGDwgpANIWg&rs=AMzJL3m70T6ZIaM24UMS7HskJR_0_SyBKQ",
+                "width": 640,
+                "height": 360
+               }
+              ]
+             }
+            }
+           },
+           "onTap": {
+            "watchEndpoint": {
+             "videoId": "D8k4Bx_LC7c"
+            }
+           },
+           "title": {
+            "runs": [
+             {
+              "text": "The U.S. Missile Stockpile Is Dangerously Low",
+              "navigationEndpoint": {
+               "browseEndpoint": {
+                "browseId": "MPEDD8k4Bx_LC7c",
+                "browseEndpointContextSupportedConfigs": {
+                 "browseEndpointContextMusicConfig": {
+                  "pageType": "MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE"
+                 }
+                }
+               }
+              }
+             }
+            ]
+           },
+           "subtitle": {
+            "runs": [
+             {
+              "text": "43K views"
+             },
+             {
+              "text": " • "
+             },
+             {
+              "text": "1d ago"
+             }
+            ]
+           },
+           "description": {
+            "runs": [
+             {
+              "text": "As the fighting with Iran has dragged on, American forces have been burning through their weapons, creating a shortage of munitions that is leaving the United S"
+             }
+            ]
+           },
+           "playbackProgress": {
+            "musicPlaybackProgressRenderer": {
+             "playbackProgressPercentage": 0,
+             "durationText": {
+              "runs": [
+               {
+                "text": " • "
+               },
+               {
+                "text": "31 min"
+               }
+              ]
+             }
+            }
+           }
+          }
+         },
+         {
+          "musicMultiRowListItemRenderer": {
+           "thumbnail": {
+            "musicThumbnailRenderer": {
+             "thumbnail": {
+              "thumbnails": [
+               {
+                "url": "https://i.ytimg.com/vi/2MU9myc1mPI/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3ltrHkkckq9PT5VQK9d-D4JGkwREQ",
+                "width": 400,
+                "height": 225
+               },
+               {
+                "url": "https://i.ytimg.com/vi/2MU9myc1mPI/sddefault.jpg?sqp=-oaymwEWCIAFEOgCIAQqCggAEIAFGDwgpANIWg&rs=AMzJL3nWgzdZj_6pXl2aFnvBr-zwxpbdRg",
+                "width": 640,
+                "height": 360
+               }
+              ]
+             }
+            }
+           },
+           "onTap": {
+            "watchEndpoint": {
+             "videoId": "2MU9myc1mPI"
+            }
+           },
+           "title": {
+            "runs": [
+             {
+              "text": "Why Adults Are Getting Cancer at a Younger Age",
+              "navigationEndpoint": {
+               "browseEndpoint": {
+                "browseId": "MPED2MU9myc1mPI",
+                "browseEndpointContextSupportedConfigs": {
+                 "browseEndpointContextMusicConfig": {
+                  "pageType": "MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE"
+                 }
+                }
+               }
+              }
+             }
+            ]
+           },
+           "subtitle": {
+            "runs": [
+             {
+              "text": "33K views"
+             },
+             {
+              "text": " • "
+             },
+             {
+              "text": "2d ago"
+             }
+            ]
+           },
+           "description": {
+            "runs": [
+             {
+              "text": "For years, cancer has been seen as a disease people mostly get when they’re older. That seems to be changing as more young people are getting cancer than ever b"
+             }
+            ]
+           },
+           "playbackProgress": {
+            "musicPlaybackProgressRenderer": {
+             "playbackProgressPercentage": 0,
+             "durationText": {
+              "runs": [
+               {
+                "text": " • "
+               },
+               {
+                "text": "28 min"
+               }
+              ]
+             }
+            }
+           }
+          }
+         },
+         {
+          "musicMultiRowListItemRenderer": {
+           "thumbnail": {
+            "musicThumbnailRenderer": {
+             "thumbnail": {
+              "thumbnails": [
+               {
+                "url": "https://i.ytimg.com/vi/ehpo1-3tGAA/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3m3PGYXS9GX_2onqELxGN0416cKbg",
+                "width": 400,
+                "height": 225
+               },
+               {
+                "url": "https://i.ytimg.com/vi/ehpo1-3tGAA/sddefault.jpg?sqp=-oaymwEWCIAFEOgCIAQqCggAEIAFGDwgpANIWg&rs=AMzJL3m0CPVKdfO57LDLN5bCpVM1SpqjJQ",
+                "width": 640,
+                "height": 360
+               }
+              ]
+             }
+            }
+           },
+           "onTap": {
+            "watchEndpoint": {
+             "videoId": "ehpo1-3tGAA"
+            }
+           },
+           "title": {
+            "runs": [
+             {
+              "text": "The Cyclospora Mystery: How Human Poop Got on So Much Lettuce",
+              "navigationEndpoint": {
+               "browseEndpoint": {
+                "browseId": "MPEDehpo1-3tGAA",
+                "browseEndpointContextSupportedConfigs": {
+                 "browseEndpointContextMusicConfig": {
+                  "pageType": "MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE"
+                 }
+                }
+               }
+              }
+             }
+            ]
+           },
+           "subtitle": {
+            "runs": [
+             {
+              "text": "108K views"
+             },
+             {
+              "text": " • "
+             },
+             {
+              "text": "6d ago"
+             }
+            ]
+           },
+           "description": {
+            "runs": [
+             {
+              "text": "U.S. health officials linked six more states to what’s now the largest outbreak of cyclospora in American history — an outbreak that has contributed to at least"
+             }
+            ]
+           },
+           "playbackProgress": {
+            "musicPlaybackProgressRenderer": {
+             "playbackProgressPercentage": 0,
+             "durationText": {
+              "runs": [
+               {
+                "text": " • "
+               },
+               {
+                "text": "30 min"
+               }
+              ]
+             }
+            }
+           }
+          }
+         }
+        ],
+        "continuations": [
+         {
+          "nextContinuationData": {
+           "continuation": "4qmFsgJmEiZNUFNQUExkTXJiZ1lmVmwtczE2RF9pVDJCSkNKOTBwV3RUTzFBNBo8ZWg1UVZEcERSMUZwUlVSb1IxSlVRa05PYTAweFRsVkZNbEZVWkVKT2FtZVNBUU1JMlFqYUNBUUlBaEFC"
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   }
+  }
+ }
+}

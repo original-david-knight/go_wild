@@ -1,0 +1,185 @@
+{
+  "responseContext": {"serviceTrackingParams": []},
+  "contents": {
+    "singleColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "title": "Library",
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  {
+                    "itemSectionRenderer": {
+                      "contents": [
+                        {
+                          "gridRenderer": {
+                            "items": [
+                              {
+                                "musicTwoRowItemRenderer": {
+                                  "thumbnailRenderer": {
+                                    "musicThumbnailRenderer": {
+                                      "thumbnail": {
+                                        "thumbnails": [
+                                          {"url": "https://www.gstatic.com/youtube/media/ytm/images/pbg/create-playlist-@576.png", "width": 576, "height": 576}
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "aspectRatio": "MUSIC_TWO_ROW_ITEM_THUMBNAIL_ASPECT_RATIO_SQUARE",
+                                  "title": {"runs": [{"text": "New playlist"}]},
+                                  "navigationEndpoint": {
+                                    "clickTrackingParams": "CBYQ8JMBGAAiEwjqxxxxxxxxxxxxxxxxxxxxxxx=",
+                                    "createPlaylistEndpoint": {}
+                                  }
+                                }
+                              },
+                              {
+                                "musicTwoRowItemRenderer": {
+                                  "thumbnailRenderer": {
+                                    "musicThumbnailRenderer": {
+                                      "thumbnail": {
+                                        "thumbnails": [
+                                          {"url": "https://www.gstatic.com/youtube/media/ytm/images/pbg/liked-music-@232.png", "width": 232, "height": 232},
+                                          {"url": "https://www.gstatic.com/youtube/media/ytm/images/pbg/liked-music-@576.png", "width": 576, "height": 576}
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "aspectRatio": "MUSIC_TWO_ROW_ITEM_THUMBNAIL_ASPECT_RATIO_SQUARE",
+                                  "title": {
+                                    "runs": [
+                                      {
+                                        "text": "Your Likes",
+                                        "navigationEndpoint": {
+                                          "clickTrackingParams": "CBUQxE8YASITCOqxxxxxxxxxxxxxxxxxxxxxx=",
+                                          "browseEndpoint": {
+                                            "browseId": "VLLM",
+                                            "browseEndpointContextSupportedConfigs": {
+                                              "browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_PLAYLIST"}
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  "subtitle": {"runs": [{"text": "Auto playlist"}]},
+                                  "navigationEndpoint": {
+                                    "clickTrackingParams": "CBUQxE8YASITCOqxxxxxxxxxxxxxxxxxxxxxx=",
+                                    "browseEndpoint": {
+                                      "browseId": "VLLM",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_PLAYLIST"}
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "musicTwoRowItemRenderer": {
+                                  "thumbnailRenderer": {
+                                    "musicThumbnailRenderer": {
+                                      "thumbnail": {
+                                        "thumbnails": [
+                                          {"url": "https://lh3.googleusercontent.com/road-trip-mix-cover=w226-h226-l90-rj", "width": 226, "height": 226},
+                                          {"url": "https://lh3.googleusercontent.com/road-trip-mix-cover=w544-h544-l90-rj", "width": 544, "height": 544}
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "aspectRatio": "MUSIC_TWO_ROW_ITEM_THUMBNAIL_ASPECT_RATIO_SQUARE",
+                                  "title": {
+                                    "runs": [
+                                      {
+                                        "text": "Road Trip Mix",
+                                        "navigationEndpoint": {
+                                          "clickTrackingParams": "CBQQxE8YAiITCOqxxxxxxxxxxxxxxxxxxxxxx=",
+                                          "browseEndpoint": {
+                                            "browseId": "VLPLQwVIlKxHM6rz0fDJVv_0UlXGEWf-bFys",
+                                            "browseEndpointContextSupportedConfigs": {
+                                              "browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_PLAYLIST"}
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  "subtitle": {
+                                    "runs": [
+                                      {"text": "David Knight"},
+                                      {"text": " • "},
+                                      {"text": "42 songs"}
+                                    ]
+                                  },
+                                  "navigationEndpoint": {
+                                    "clickTrackingParams": "CBQQxE8YAiITCOqxxxxxxxxxxxxxxxxxxxxxx=",
+                                    "browseEndpoint": {
+                                      "browseId": "VLPLQwVIlKxHM6rz0fDJVv_0UlXGEWf-bFys",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_PLAYLIST"}
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "musicTwoRowItemRenderer": {
+                                  "thumbnailRenderer": {
+                                    "musicThumbnailRenderer": {
+                                      "thumbnail": {
+                                        "thumbnails": [
+                                          {"url": "https://lh3.googleusercontent.com/everything-ever-cover=w544-h544-l90-rj", "width": 544, "height": 544}
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "aspectRatio": "MUSIC_TWO_ROW_ITEM_THUMBNAIL_ASPECT_RATIO_SQUARE",
+                                  "title": {
+                                    "runs": [
+                                      {
+                                        "text": "Everything Ever",
+                                        "navigationEndpoint": {
+                                          "clickTrackingParams": "CBMQxE8YAyITCOqxxxxxxxxxxxxxxxxxxxxxx=",
+                                          "browseEndpoint": {
+                                            "browseId": "VLPL6bPxvf5dW5clc3y9wAoslzqUrmkZ5c-u",
+                                            "browseEndpointContextSupportedConfigs": {
+                                              "browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_PLAYLIST"}
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  "subtitle": {
+                                    "runs": [
+                                      {"text": "David Knight"},
+                                      {"text": " • "},
+                                      {"text": "1,554 tracks"}
+                                    ]
+                                  },
+                                  "navigationEndpoint": {
+                                    "clickTrackingParams": "CBMQxE8YAyITCOqxxxxxxxxxxxxxxxxxxxxxx=",
+                                    "browseEndpoint": {
+                                      "browseId": "VLPL6bPxvf5dW5clc3y9wAoslzqUrmkZ5c-u",
+                                      "browseEndpointContextSupportedConfigs": {
+                                        "browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_PLAYLIST"}
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,331 @@
+{
+  "responseContext": {
+    "serviceTrackingParams": []
+  },
+  "onResponseReceivedActions": [
+    {
+      "appendContinuationItemsAction": {
+        "continuationItems": [
+          {
+            "musicResponsiveListItemRenderer": {
+              "thumbnail": {
+                "musicThumbnailRenderer": {
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi/yyDUC1LUXSU/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3ktPXcizhvfC_PL3sfLrhU9GK1SCA",
+                        "width": 400,
+                        "height": 225
+                      }
+                    ]
+                  },
+                  "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+                  "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT",
+                  "trackingParams": "CIENEIS_AiITCLbes-HEm5YDFVP75wMdDgIwTA=="
+                }
+              },
+              "playlistItemData": {
+                "playlistSetVideoId": "0A288FEEA4CD7840",
+                "videoId": "yyDUC1LUXSU",
+                "voteSortValue": 1483736472
+              },
+              "flexColumns": [
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        {
+                          "text": "Blurred Lines (feat. Pharrell & T.I.)",
+                          "navigationEndpoint": {
+                            "clickTrackingParams": "CPAMEMn0AhgBIhMItt6z4cSblgMVU_vnAx0OAjBMygEE6xF_nQ==",
+                            "watchEndpoint": {
+                              "videoId": "yyDUC1LUXSU",
+                              "playlistId": "PL6bPxvf5dW5clc3y9wAoslzqUrmkZ5c-u",
+                              "playerParams": "iAQB8AUB",
+                              "loggingContext": {
+                                "vssLoggingContext": {
+                                  "serializedContextData": "GiJQTDZiUHh2ZjVkVzVjbGMzeTl3QW9zbHpxVXJta1o1Yy11"
+                                }
+                              },
+                              "watchEndpointMusicSupportedConfigs": {
+                                "watchEndpointMusicConfig": {
+                                  "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                  }
+                },
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        {
+                          "text": "Robin Thicke",
+                          "navigationEndpoint": {
+                            "clickTrackingParams": "CPAMEMn0AhgBIhMItt6z4cSblgMVU_vnAx0OAjBMygEE6xF_nQ==",
+                            "browseEndpoint": {
+                              "browseId": "UCyYnxJIyBDCIkDIpE7lsUkw",
+                              "browseEndpointContextSupportedConfigs": {
+                                "browseEndpointContextMusicConfig": {
+                                  "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                  }
+                },
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {},
+                    "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_MEDIUM"
+                  }
+                }
+              ],
+              "fixedColumns": [
+                {
+                  "musicResponsiveListItemFixedColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        {
+                          "text": "4:32"
+                        }
+                      ],
+                      "accessibility": {
+                        "accessibilityData": {
+                          "label": "4 minutes, 32 seconds"
+                        }
+                      }
+                    },
+                    "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH",
+                    "size": "MUSIC_RESPONSIVE_LIST_ITEM_FIXED_COLUMN_SIZE_SMALL"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "musicResponsiveListItemRenderer": {
+              "thumbnail": {
+                "musicThumbnailRenderer": {
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi/NdYWuo9OFAw/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mJD8TF5C8_6BOGt0BcBZ7n5urLMw",
+                        "width": 400,
+                        "height": 225
+                      }
+                    ]
+                  },
+                  "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+                  "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT",
+                  "trackingParams": "CO8MEIS_AiITCLbes-HEm5YDFVP75wMdDgIwTA=="
+                }
+              },
+              "playlistItemData": {
+                "playlistSetVideoId": "55C055DD3AD78DC4",
+                "videoId": "NdYWuo9OFAw",
+                "voteSortValue": 1483736473
+              },
+              "flexColumns": [
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        {
+                          "text": "Iris",
+                          "navigationEndpoint": {
+                            "clickTrackingParams": "CN4MEMn0AhgCIhMItt6z4cSblgMVU_vnAx0OAjBMygEE6xF_nQ==",
+                            "watchEndpoint": {
+                              "videoId": "NdYWuo9OFAw",
+                              "playlistId": "PL6bPxvf5dW5clc3y9wAoslzqUrmkZ5c-u",
+                              "playerParams": "iAQB8AUB",
+                              "loggingContext": {
+                                "vssLoggingContext": {
+                                  "serializedContextData": "GiJQTDZiUHh2ZjVkVzVjbGMzeTl3QW9zbHpxVXJta1o1Yy11"
+                                }
+                              },
+                              "watchEndpointMusicSupportedConfigs": {
+                                "watchEndpointMusicConfig": {
+                                  "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                  }
+                },
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        {
+                          "text": "The Goo Goo Dolls",
+                          "navigationEndpoint": {
+                            "clickTrackingParams": "CN4MEMn0AhgCIhMItt6z4cSblgMVU_vnAx0OAjBMygEE6xF_nQ==",
+                            "browseEndpoint": {
+                              "browseId": "UCjOkbXu7vYeeQrA7R3-OfXQ",
+                              "browseEndpointContextSupportedConfigs": {
+                                "browseEndpointContextMusicConfig": {
+                                  "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                  }
+                },
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {},
+                    "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_MEDIUM"
+                  }
+                }
+              ],
+              "fixedColumns": [
+                {
+                  "musicResponsiveListItemFixedColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        {
+                          "text": "3:36"
+                        }
+                      ],
+                      "accessibility": {
+                        "accessibilityData": {
+                          "label": "3 minutes, 36 seconds"
+                        }
+                      }
+                    },
+                    "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH",
+                    "size": "MUSIC_RESPONSIVE_LIST_ITEM_FIXED_COLUMN_SIZE_SMALL"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "musicResponsiveListItemRenderer": {
+              "thumbnail": {
+                "musicThumbnailRenderer": {
+                  "thumbnail": {
+                    "thumbnails": [
+                      {
+                        "url": "https://i.ytimg.com/vi/K8TRRof5V0o/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lSgBb8EsYqMyHEYl7aySDxuSIeLg",
+                        "width": 400,
+                        "height": 225
+                      }
+                    ]
+                  },
+                  "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+                  "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT",
+                  "trackingParams": "CN0MEIS_AiITCLbes-HEm5YDFVP75wMdDgIwTA=="
+                }
+              },
+              "playlistItemData": {
+                "playlistSetVideoId": "AEEB7A4310C00632",
+                "videoId": "K8TRRof5V0o",
+                "voteSortValue": 1483736479
+              },
+              "flexColumns": [
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        {
+                          "text": "Queen - Who wants to live forever - Remastered [HD] - with lyrics",
+                          "navigationEndpoint": {
+                            "clickTrackingParams": "CM0MEMn0AhgDIhMItt6z4cSblgMVU_vnAx0OAjBMygEE6xF_nQ==",
+                            "watchEndpoint": {
+                              "videoId": "K8TRRof5V0o",
+                              "playlistId": "PL6bPxvf5dW5clc3y9wAoslzqUrmkZ5c-u",
+                              "playerParams": "iAQB8AUB",
+                              "loggingContext": {
+                                "vssLoggingContext": {
+                                  "serializedContextData": "GiJQTDZiUHh2ZjVkVzVjbGMzeTl3QW9zbHpxVXJta1o1Yy11"
+                                }
+                              },
+                              "watchEndpointMusicSupportedConfigs": {
+                                "watchEndpointMusicConfig": {
+                                  "musicVideoType": "MUSIC_VIDEO_TYPE_UGC"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                  }
+                },
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        {
+                          "text": "queenremastered4",
+                          "navigationEndpoint": {
+                            "clickTrackingParams": "CM0MEMn0AhgDIhMItt6z4cSblgMVU_vnAx0OAjBMygEE6xF_nQ==",
+                            "browseEndpoint": {
+                              "browseId": "UCuMbxFl0J5xzFULc2RJYH9w",
+                              "browseEndpointContextSupportedConfigs": {
+                                "browseEndpointContextMusicConfig": {
+                                  "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+                  }
+                },
+                {
+                  "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": {},
+                    "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_MEDIUM"
+                  }
+                }
+              ],
+              "fixedColumns": [
+                {
+                  "musicResponsiveListItemFixedColumnRenderer": {
+                    "text": {
+                      "runs": [
+                        {
+                          "text": "4:58"
+                        }
+                      ],
+                      "accessibility": {
+                        "accessibilityData": {
+                          "label": "4 minutes, 58 seconds"
+                        }
+                      }
+                    },
+                    "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH",
+                    "size": "MUSIC_RESPONSIVE_LIST_ITEM_FIXED_COLUMN_SIZE_SMALL"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

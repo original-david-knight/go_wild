@@ -1,0 +1,199 @@
+{
+ "contents": {
+  "singleColumnBrowseResultsRenderer": {
+   "tabs": [
+    {
+     "tabRenderer": {
+      "title": "Library",
+      "content": {
+       "sectionListRenderer": {
+        "contents": [
+         {
+          "itemSectionRenderer": {
+           "contents": [
+            {
+             "gridRenderer": {
+              "items": [
+               {
+                "musicTwoRowItemRenderer": {
+                 "title": {
+                  "runs": [
+                   {
+                    "text": "Add podcast",
+                    "navigationEndpoint": {
+                     "browseEndpoint": {
+                      "browseId": "FEmusic_library_add_podcasts"
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "thumbnailRenderer": {
+                  "musicThumbnailRenderer": {
+                   "thumbnail": {
+                    "thumbnails": []
+                   }
+                  }
+                 }
+                }
+               },
+               {
+                "musicTwoRowItemRenderer": {
+                 "title": {
+                  "runs": [
+                   {
+                    "text": "New episodes",
+                    "navigationEndpoint": {
+                     "browseEndpoint": {
+                      "browseId": "VLSE",
+                      "browseEndpointContextSupportedConfigs": {
+                       "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_PLAYLIST"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "subtitle": {
+                  "runs": [
+                   {
+                    "text": "Auto playlist"
+                   }
+                  ]
+                 },
+                 "thumbnailRenderer": {
+                  "musicThumbnailRenderer": {
+                   "thumbnail": {
+                    "thumbnails": [
+                     {
+                      "url": "https://www.gstatic.com/youtube/media/ytm/images/pbg/new-episodes-@576.png",
+                      "width": 576,
+                      "height": 576
+                     }
+                    ]
+                   }
+                  }
+                 }
+                }
+               },
+               {
+                "musicTwoRowItemRenderer": {
+                 "title": {
+                  "runs": [
+                   {
+                    "text": "The Daily",
+                    "navigationEndpoint": {
+                     "browseEndpoint": {
+                      "browseId": "MPSPPLdMrbgYfVl-s16D_iT2BJCJ90pWtTO1A4",
+                      "browseEndpointContextSupportedConfigs": {
+                       "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "subtitle": {
+                  "runs": [
+                   {
+                    "text": "New York Times Podcasts",
+                    "navigationEndpoint": {
+                     "browseEndpoint": {
+                      "browseId": "UCqVDpXKLmKeBU_yyt_QkItQ",
+                      "browseEndpointContextSupportedConfigs": {
+                       "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_USER_CHANNEL"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "thumbnailRenderer": {
+                  "musicThumbnailRenderer": {
+                   "thumbnail": {
+                    "thumbnails": [
+                     {
+                      "url": "https://i.ytimg.com/podcasts_artwork/PLdMrbgYfVl-s16D_iT2BJCJ90pWtTO1A4/small.jpg",
+                      "width": 226,
+                      "height": 226
+                     },
+                     {
+                      "url": "https://i.ytimg.com/podcasts_artwork/PLdMrbgYfVl-s16D_iT2BJCJ90pWtTO1A4/large.jpg",
+                      "width": 544,
+                      "height": 544
+                     }
+                    ]
+                   }
+                  }
+                 }
+                }
+               },
+               {
+                "musicTwoRowItemRenderer": {
+                 "title": {
+                  "runs": [
+                   {
+                    "text": "The Ezra Klein Show",
+                    "navigationEndpoint": {
+                     "browseEndpoint": {
+                      "browseId": "MPSPPL4n3AtGdRxJgywUZQYUk3k2-HXIQ_fIHE",
+                      "browseEndpointContextSupportedConfigs": {
+                       "browseEndpointContextMusicConfig": {
+                        "pageType": "MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE"
+                       }
+                      }
+                     }
+                    }
+                   }
+                  ]
+                 },
+                 "subtitle": {
+                  "runs": [
+                   {
+                    "text": "The Ezra Klein Show"
+                   }
+                  ]
+                 },
+                 "thumbnailRenderer": {
+                  "musicThumbnailRenderer": {
+                   "thumbnail": {
+                    "thumbnails": [
+                     {
+                      "url": "https://i.ytimg.com/podcasts_artwork/PL4n3AtGdRxJgywUZQYUk3k2-HXIQ_fIHE/large.jpg",
+                      "width": 544,
+                      "height": 544
+                     }
+                    ]
+                   }
+                  }
+                 }
+                }
+               }
+              ],
+              "continuations": [
+               {
+                "nextContinuationData": {
+                 "continuation": "LIBRARY_PODCASTS_CONT_TOKEN_1"
+                }
+               }
+              ]
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   ]
+  }
+ }
+}

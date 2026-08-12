@@ -1,0 +1,245 @@
+{
+ "continuationContents": {
+  "musicShelfContinuation": {
+   "contents": [
+    {
+     "musicMultiRowListItemRenderer": {
+      "thumbnail": {
+       "musicThumbnailRenderer": {
+        "thumbnail": {
+         "thumbnails": [
+          {
+           "url": "https://i.ytimg.com/vi/Ce1RVnjhzkA/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mFIbj6DNmgKC8GpBBpG-6XlCTnHA",
+           "width": 400,
+           "height": 225
+          },
+          {
+           "url": "https://i.ytimg.com/vi/Ce1RVnjhzkA/sddefault.jpg?sqp=-oaymwEWCIAFEOgCIAQqCggAEIAFGDwgpANIWg&rs=AMzJL3lzNhAPpaqzmAl0rWD-rxn1I7q1zw",
+           "width": 640,
+           "height": 360
+          }
+         ]
+        }
+       }
+      },
+      "onTap": {
+       "watchEndpoint": {
+        "videoId": "Ce1RVnjhzkA"
+       }
+      },
+      "title": {
+       "runs": [
+        {
+         "text": "The Secret Plan to End U.S. Climate Regulations",
+         "navigationEndpoint": {
+          "browseEndpoint": {
+           "browseId": "MPEDCe1RVnjhzkA",
+           "browseEndpointContextSupportedConfigs": {
+            "browseEndpointContextMusicConfig": {
+             "pageType": "MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE"
+            }
+           }
+          }
+         }
+        }
+       ]
+      },
+      "subtitle": {
+       "runs": [
+        {
+         "text": "33K views"
+        },
+        {
+         "text": " • "
+        },
+        {
+         "text": "Feb 12"
+        }
+       ]
+      },
+      "description": {
+       "runs": [
+        {
+         "text": "The administrator of the Environmental Protection Agency is expected on Thursday to repeal a scientific finding that requires the federal government to fight gl"
+        }
+       ]
+      },
+      "playbackProgress": {
+       "musicPlaybackProgressRenderer": {
+        "playbackProgressPercentage": 0,
+        "durationText": {
+         "runs": [
+          {
+           "text": " • "
+          },
+          {
+           "text": "30 min"
+          }
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "musicMultiRowListItemRenderer": {
+      "thumbnail": {
+       "musicThumbnailRenderer": {
+        "thumbnail": {
+         "thumbnails": [
+          {
+           "url": "https://i.ytimg.com/vi/JtgVg7aZ7wI/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lE5vCg6bwPzka6qWuVSEeslRT1lg",
+           "width": 400,
+           "height": 225
+          },
+          {
+           "url": "https://i.ytimg.com/vi/JtgVg7aZ7wI/sddefault.jpg?sqp=-oaymwEWCIAFEOgCIAQqCggAEIAFGDwgpANIWg&rs=AMzJL3n74DIsXEun1NxGxT17mYIjNjwo5w",
+           "width": 640,
+           "height": 360
+          }
+         ]
+        }
+       }
+      },
+      "onTap": {
+       "watchEndpoint": {
+        "videoId": "JtgVg7aZ7wI"
+       }
+      },
+      "title": {
+       "runs": [
+        {
+         "text": "TrumpRx Opens for Business",
+         "navigationEndpoint": {
+          "browseEndpoint": {
+           "browseId": "MPEDJtgVg7aZ7wI",
+           "browseEndpointContextSupportedConfigs": {
+            "browseEndpointContextMusicConfig": {
+             "pageType": "MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE"
+            }
+           }
+          }
+         }
+        }
+       ]
+      },
+      "subtitle": {
+       "runs": [
+        {
+         "text": "25K views"
+        },
+        {
+         "text": " • "
+        },
+        {
+         "text": "Feb 11"
+        }
+       ]
+      },
+      "description": {
+       "runs": [
+        {
+         "text": "Last week, the Trump administration unveiled TrumpRx to try to counteract the high cost of prescription drugs. The president hailed the website as a “transforma"
+        }
+       ]
+      },
+      "playbackProgress": {
+       "musicPlaybackProgressRenderer": {
+        "playbackProgressPercentage": 0,
+        "durationText": {
+         "runs": [
+          {
+           "text": " • "
+          },
+          {
+           "text": "23 min"
+          }
+         ]
+        }
+       }
+      }
+     }
+    },
+    {
+     "musicMultiRowListItemRenderer": {
+      "thumbnail": {
+       "musicThumbnailRenderer": {
+        "thumbnail": {
+         "thumbnails": [
+          {
+           "url": "https://i.ytimg.com/vi/6yqj_6h_miI/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lhKi7wB8-eKYFRthwXnAQuOcVnrg",
+           "width": 400,
+           "height": 225
+          },
+          {
+           "url": "https://i.ytimg.com/vi/6yqj_6h_miI/sddefault.jpg?sqp=-oaymwEWCIAFEOgCIAQqCggAEIAFGDwgpANIWg&rs=AMzJL3lmitVINMVkapQBl8sA_EAJA-nCqQ",
+           "width": 640,
+           "height": 360
+          }
+         ]
+        }
+       }
+      },
+      "onTap": {
+       "watchEndpoint": {
+        "videoId": "6yqj_6h_miI"
+       }
+      },
+      "title": {
+       "runs": [
+        {
+         "text": "Deception and Dependency: Inside the Latest Epstein Files",
+         "navigationEndpoint": {
+          "browseEndpoint": {
+           "browseId": "MPED6yqj_6h_miI",
+           "browseEndpointContextSupportedConfigs": {
+            "browseEndpointContextMusicConfig": {
+             "pageType": "MUSIC_PAGE_TYPE_NON_MUSIC_AUDIO_TRACK_PAGE"
+            }
+           }
+          }
+         }
+        }
+       ]
+      },
+      "subtitle": {
+       "runs": [
+        {
+         "text": "86K views"
+        },
+        {
+         "text": " • "
+        },
+        {
+         "text": "Feb 10"
+        }
+       ]
+      },
+      "description": {
+       "runs": [
+        {
+         "text": "The latest release of documents related to Jeffrey Epstein has revealed deep and intense relationships with the global elite, long after he became a convicted s"
+        }
+       ]
+      },
+      "playbackProgress": {
+       "musicPlaybackProgressRenderer": {
+        "playbackProgressPercentage": 0,
+        "durationText": {
+         "runs": [
+          {
+           "text": " • "
+          },
+          {
+           "text": "40 min"
+          }
+         ]
+        }
+       }
+      }
+     }
+    }
+   ]
+  }
+ }
+}
