@@ -284,7 +284,29 @@ func parseShelfTrack(renderer map[string]any) (Track, bool) {
 		Album:        flexColumnText(renderer, 2),
 		DurationSec:  parseDurationText(fixedColumnText(renderer, 0)),
 		ThumbnailURL: largestThumbnail(renderer, "thumbnail", "musicThumbnailRenderer", "thumbnail", "thumbnails"),
+		VideoType:    trackVideoType(renderer),
 	}, true
+}
+
+// trackVideoType reads the row's musicVideoType. Live responses carry it in
+// two places that always agree: on the thumbnail overlay's play button, and on
+// the title run's navigationEndpoint. The overlay is read first (it is the
+// reference location, cf. ytmusicapi), the title run second. Rows without a
+// watch endpoint anywhere — greyed-out unavailable tracks — yield "".
+func trackVideoType(renderer map[string]any) string {
+	if t, ok := navString(renderer,
+		"overlay", "musicItemThumbnailOverlayRenderer", "content",
+		"musicPlayButtonRenderer", "playNavigationEndpoint", "watchEndpoint",
+		"watchEndpointMusicSupportedConfigs", "watchEndpointMusicConfig",
+		"musicVideoType"); ok {
+		return t
+	}
+	t, _ := navString(renderer,
+		"flexColumns", 0, "musicResponsiveListItemFlexColumnRenderer",
+		"text", "runs", 0, "navigationEndpoint", "watchEndpoint",
+		"watchEndpointMusicSupportedConfigs", "watchEndpointMusicConfig",
+		"musicVideoType")
+	return t
 }
 
 // flexColumnText joins every run of flex column i: artist columns emit each

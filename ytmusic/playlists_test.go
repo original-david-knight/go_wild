@@ -143,9 +143,13 @@ func TestPlaylistTracksTwoPages(t *testing.T) {
 		Album:        "", // video playlist rows carry an empty album column
 		DurationSec:  284,
 		ThumbnailURL: "https://i.ytimg.com/vi/EPhWR4d3FJQ/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mGS7HCTeCB_BUNL0DRXQAG8n3RDQ",
+		VideoType:    VideoTypeOMV, // the captured row carries it on the title run's watchEndpoint
 	}
 	if !reflect.DeepEqual(tracks[0], wantFirst) {
 		t.Errorf("tracks[0] =\n%+v\nwant\n%+v", tracks[0], wantFirst)
+	}
+	if tracks[0].IsPrivatelyOwned() {
+		t.Error("tracks[0].IsPrivatelyOwned() = true; an OMV row is not privately owned")
 	}
 	// Multi-artist rows split names and separators into individual runs.
 	if got := tracks[3].Artist; got != "Eurythmics, Annie Lennox & Dave Stewart" {
@@ -157,6 +161,9 @@ func TestPlaylistTracksTwoPages(t *testing.T) {
 	}
 	if tracks[6].VideoID != "K8TRRof5V0o" {
 		t.Errorf("tracks[6].VideoID = %q; want last continuation-page track", tracks[6].VideoID)
+	}
+	if tracks[6].VideoType != VideoTypeUGC {
+		t.Errorf("tracks[6].VideoType = %q; want the fixture's genuine MUSIC_VIDEO_TYPE_UGC", tracks[6].VideoType)
 	}
 }
 
@@ -180,12 +187,15 @@ func TestPlaylistTracksKeepsExistingVLPrefix(t *testing.T) {
 
 // The pre-2024 response generation: top-level musicDetailHeaderRenderer with
 // cropped cover art, single-column musicShelfRenderer tracks, simpleText
-// durations, and a populated album column.
+// durations, and a populated album column. musicVideoType placement covers
+// both real locations: track one carries it on the thumbnail overlay's play
+// button, track two only on the title run's watchEndpoint, track three not at
+// all (a greyed-out unavailable row has no watch endpoint anywhere).
 const detailHeaderPlaylist = `{
   "header": {
     "musicDetailHeaderRenderer": {
       "title": {"runs": [{"text": "Old Shape Mix"}]},
-      "secondSubtitle": {"runs": [{"text": "2 songs"}, {"text": " • "}, {"text": "8 minutes"}]},
+      "secondSubtitle": {"runs": [{"text": "3 songs"}, {"text": " • "}, {"text": "11 minutes"}]},
       "thumbnail": {
         "croppedSquareThumbnailRenderer": {
           "thumbnail": {"thumbnails": [
@@ -206,6 +216,12 @@ const detailHeaderPlaylist = `{
                 {"url": "https://lh3.googleusercontent.com/track-one=w60-h60-l90-rj", "width": 60, "height": 60},
                 {"url": "https://lh3.googleusercontent.com/track-one=w120-h120-l90-rj", "width": 120, "height": 120}
               ]}}},
+              "overlay": {"musicItemThumbnailOverlayRenderer": {"content": {"musicPlayButtonRenderer": {
+                "playNavigationEndpoint": {"watchEndpoint": {
+                  "videoId": "dQw4w9WgXcQ",
+                  "watchEndpointMusicSupportedConfigs": {"watchEndpointMusicConfig": {"musicVideoType": "MUSIC_VIDEO_TYPE_ATV"}}
+                }}
+              }}}},
               "playlistItemData": {"playlistSetVideoId": "0AB1", "videoId": "dQw4w9WgXcQ"},
               "flexColumns": [
                 {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Never Gonna Give You Up"}]}}},
@@ -224,12 +240,28 @@ const detailHeaderPlaylist = `{
             {"musicResponsiveListItemRenderer": {
               "playlistItemData": {"videoId": "oHg5SJYRHA0"},
               "flexColumns": [
-                {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Second Song"}]}}},
+                {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{
+                  "text": "Second Song",
+                  "navigationEndpoint": {"watchEndpoint": {
+                    "videoId": "oHg5SJYRHA0",
+                    "watchEndpointMusicSupportedConfigs": {"watchEndpointMusicConfig": {"musicVideoType": "MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK"}}
+                  }}
+                }]}}},
                 {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Somebody"}]}}},
                 {"musicResponsiveListItemFlexColumnRenderer": {"text": {}}}
               ],
               "fixedColumns": [
                 {"musicResponsiveListItemFixedColumnRenderer": {"text": {"runs": [{"text": "4:41"}]}}}
+              ]
+            }},
+            {"musicResponsiveListItemRenderer": {
+              "playlistItemData": {"videoId": "xvFZjo5PgG0"},
+              "flexColumns": [
+                {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Unavailable Song"}]}}},
+                {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{"text": "Nobody"}]}}}
+              ],
+              "fixedColumns": [
+                {"musicResponsiveListItemFixedColumnRenderer": {"text": {"simpleText": "2:57"}}}
               ]
             }}
           ]
@@ -250,7 +282,7 @@ func TestPlaylistTracksDetailHeaderShape(t *testing.T) {
 	wantPlaylist := Playlist{
 		ID:           "PLoldshape",
 		Title:        "Old Shape Mix",
-		TrackCount:   2,
+		TrackCount:   3,
 		ThumbnailURL: "https://lh3.googleusercontent.com/old-mix=w544-h544-l90-rj",
 	}
 	if !reflect.DeepEqual(playlist, wantPlaylist) {
@@ -264,11 +296,25 @@ func TestPlaylistTracksDetailHeaderShape(t *testing.T) {
 			Album:        "Whenever You Need Somebody",
 			DurationSec:  213,
 			ThumbnailURL: "https://lh3.googleusercontent.com/track-one=w120-h120-l90-rj",
+			VideoType:    VideoTypeATV, // read from the thumbnail overlay's play button
 		},
-		{VideoID: "oHg5SJYRHA0", Title: "Second Song", Artist: "Somebody", DurationSec: 281},
+		{
+			VideoID:     "oHg5SJYRHA0",
+			Title:       "Second Song",
+			Artist:      "Somebody",
+			DurationSec: 281,
+			VideoType:   VideoTypePrivatelyOwned, // overlay absent: read from the title run's watchEndpoint
+		},
+		// No watch endpoint anywhere: VideoType stays "", no error.
+		{VideoID: "xvFZjo5PgG0", Title: "Unavailable Song", Artist: "Nobody", DurationSec: 177},
 	}
 	if !reflect.DeepEqual(tracks, wantTracks) {
 		t.Errorf("tracks =\n%+v\nwant\n%+v", tracks, wantTracks)
+	}
+	for i, want := range []bool{false, true, false} {
+		if got := tracks[i].IsPrivatelyOwned(); got != want {
+			t.Errorf("tracks[%d].IsPrivatelyOwned() = %v; want %v", i, got, want)
+		}
 	}
 }
 
