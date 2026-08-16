@@ -3,7 +3,6 @@ package oauth2app
 import (
 	"context"
 	"fmt"
-	"html"
 	"net"
 	"net/http"
 	"time"
@@ -73,7 +72,7 @@ func (f *Flow) ConnectLoopback(ctx context.Context, account string, opener Opene
 			return
 		}
 		if errMsg := q.Get("error"); errMsg != "" {
-			writeClosePage(w, "Consent was declined.", html.EscapeString(errMsg))
+			WriteResultPage(w, "Consent was declined.", errMsg)
 			results <- callback{err: fmt.Errorf("consent declined: %s", errMsg)}
 			return
 		}
@@ -83,7 +82,7 @@ func (f *Flow) ConnectLoopback(ctx context.Context, account string, opener Opene
 			results <- callback{err: fmt.Errorf("redirect carried no authorization code")}
 			return
 		}
-		writeClosePage(w, "Connected.", "You can close this tab and return to the terminal.")
+		WriteResultPage(w, "Connected.", "You can close this tab and return to the terminal.")
 		results <- callback{code: code}
 	})
 
@@ -112,15 +111,4 @@ func (f *Flow) ConnectLoopback(ctx context.Context, account string, opener Opene
 		return nil, result.err
 	}
 	return f.Exchange(ctx, name, redirectURL, result.code)
-}
-
-// writeClosePage answers the browser with a plain page. It is the last thing
-// the flow shows, so it says what happened and nothing else.
-func writeClosePage(w http.ResponseWriter, title, detail string) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><title>%s</title>
-<body style="font-family:system-ui;background:#161826;color:#e9e9ed;padding:3rem">
-<h1 style="font-weight:500;font-size:1.5rem">%s</h1><p style="color:#9397ab">%s</p>`,
-		html.EscapeString(title), html.EscapeString(title), detail)
 }

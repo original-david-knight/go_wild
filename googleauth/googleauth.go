@@ -40,19 +40,23 @@ const (
 	ScopeUserinfoEmail = "https://www.googleapis.com/auth/userinfo.email"
 )
 
-// ClientConfig is the installed-app client, as downloaded from the Google
-// Cloud console.
+// ClientConfig is the OAuth client, as downloaded from the Google Cloud
+// console — a Desktop-app (installed) client or a Web-application one.
 type ClientConfig struct {
 	ClientID     string
 	ClientSecret string
 	AuthURI      string
 	TokenURI     string
 	ProjectID    string
+	// Web reports a Web-application client. It is how a consumer picks the
+	// ceremony: a web client's redirect must be an exact pre-registered URL
+	// (the hosted ceremony), and only an installed client may run the
+	// loopback flow, whose redirect is a port chosen at runtime.
+	Web bool
 }
 
-// clientSecretFile mirrors the console's download shape. A desktop client
-// lands under "installed"; "web" is accepted so a misconfigured download
-// fails with a clear message rather than a nil dereference.
+// clientSecretFile mirrors the console's download shape: a Desktop client
+// lands under "installed", a Web-application one under "web".
 type clientSecretFile struct {
 	Installed *clientSecretBody `json:"installed"`
 	Web       *clientSecretBody `json:"web"`
@@ -67,12 +71,15 @@ type clientSecretBody struct {
 	RedirectURIs []string `json:"redirect_uris"`
 }
 
-// ErrWebClient is returned for a web client, which cannot do the loopback
-// flow: web clients require an exact pre-registered redirect URI, and an
-// installed app's redirect is a loopback port chosen at runtime.
+// ErrWebClient is returned when a web client is asked to do the loopback
+// flow, which it cannot: web clients require an exact pre-registered redirect
+// URI, and an installed app's redirect is a loopback port chosen at runtime.
+// A web client runs the hosted ceremony instead (Registry.Hosted).
 var ErrWebClient = fmt.Errorf("this is a web OAuth client; an installed (Desktop app) client is required")
 
-// LoadClientConfig reads a client-secret JSON from disk.
+// LoadClientConfig reads a client-secret JSON from disk — an installed
+// (Desktop app) client or a Web-application one, the loaded config's Web
+// field saying which.
 func LoadClientConfig(path string) (*ClientConfig, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -82,12 +89,12 @@ func LoadClientConfig(path string) (*ClientConfig, error) {
 	if err := json.Unmarshal(raw, &file); err != nil {
 		return nil, fmt.Errorf("parse client secret %s: %w", path, err)
 	}
-	body := file.Installed
+	body, web := file.Installed, false
 	if body == nil {
-		if file.Web != nil {
-			return nil, fmt.Errorf("%s: %w", path, ErrWebClient)
+		if file.Web == nil {
+			return nil, fmt.Errorf("%s: no installed or web client in the file", path)
 		}
-		return nil, fmt.Errorf("%s: no installed or web client in the file", path)
+		body, web = file.Web, true
 	}
 	if body.ClientID == "" || body.ClientSecret == "" {
 		return nil, fmt.Errorf("%s: client id or secret missing", path)
@@ -98,6 +105,7 @@ func LoadClientConfig(path string) (*ClientConfig, error) {
 		AuthURI:      body.AuthURI,
 		TokenURI:     body.TokenURI,
 		ProjectID:    body.ProjectID,
+		Web:          web,
 	}
 	if cfg.AuthURI == "" {
 		cfg.AuthURI = google.Endpoint.AuthURL

@@ -53,7 +53,23 @@ func (r *Registry) Connect(ctx context.Context, account string, opener Opener, o
 	if err != nil {
 		return nil, err
 	}
-	flow := &oauth2app.Flow{
+	// A web client cannot consent at a runtime-chosen loopback port; only the
+	// hosted ceremony (Registry.Hosted) fits it.
+	if r.cfg.Web {
+		return nil, ErrWebClient
+	}
+	tok, err := r.flow().ConnectLoopback(ctx, name, opener, oauth2app.LoopbackOptions{
+		Timeout: opts.Timeout, Port: opts.Port,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return r.connectResult(ctx, name, tok, opts.UserInfoURL), nil
+}
+
+// flow is oauth2app's machinery under Google's provider configuration.
+func (r *Registry) flow() *oauth2app.Flow {
+	return &oauth2app.Flow{
 		Config: r.oauthConfig(""),
 		Store:  r.store,
 		// AccessTypeOffline is what produces a refresh token at all, and
@@ -63,20 +79,19 @@ func (r *Registry) Connect(ctx context.Context, account string, opener Opener, o
 		// dies at the next restart.
 		AuthCodeOptions: []oauth2.AuthCodeOption{oauth2.AccessTypeOffline, oauth2.ApprovalForce},
 	}
-	tok, err := flow.ConnectLoopback(ctx, name, opener, oauth2app.LoopbackOptions{
-		Timeout: opts.Timeout, Port: opts.Port,
-	})
-	if err != nil {
-		return nil, err
-	}
+}
 
-	out := &ConnectResult{Account: name, Scopes: grantedScopes(tok)}
+// connectResult reports what a completed consent actually connected, whichever
+// ceremony ran it. tok must be the exchange's own token: the granted scopes
+// live in its extra fields, which a store round-trip does not keep.
+func (r *Registry) connectResult(ctx context.Context, account string, tok *oauth2.Token, userInfoURL string) *ConnectResult {
+	out := &ConnectResult{Account: account, Scopes: grantedScopes(tok)}
 	// Resolving the email is a convenience, not the point of the flow: a
 	// failure here must not discard a token that was granted and stored.
-	if email, err := r.accountEmail(ctx, tok, opts.UserInfoURL); err == nil {
+	if email, err := r.accountEmail(ctx, tok, userInfoURL); err == nil {
 		out.Email = email
 	}
-	return out, nil
+	return out
 }
 
 // grantedScopes reads the scopes the token actually carries. A user can

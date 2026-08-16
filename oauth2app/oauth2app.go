@@ -48,20 +48,23 @@ type Flow struct {
 
 // AuthURL is the consent URL for a fixed, pre-registered redirect — the
 // route the consuming service serves itself. state should come from a States
-// jar, so the callback can refuse what it did not issue.
-func (f *Flow) AuthURL(redirectURL, state string) string {
-	return f.configFor(redirectURL).AuthCodeURL(state, f.AuthCodeOptions...)
+// jar, so the callback can refuse what it did not issue. extra options ride
+// after the Flow's own (the hosted ceremony adds its PKCE challenge here).
+func (f *Flow) AuthURL(redirectURL, state string, extra ...oauth2.AuthCodeOption) string {
+	opts := append(append([]oauth2.AuthCodeOption(nil), f.AuthCodeOptions...), extra...)
+	return f.configFor(redirectURL).AuthCodeURL(state, opts...)
 }
 
 // Exchange trades an authorization code for a token at the same redirect the
 // provider saw, refuses a grant with no refresh token, and stores the rest
-// under account.
-func (f *Flow) Exchange(ctx context.Context, account, redirectURL, code string) (*oauth2.Token, error) {
+// under account. opts add per-exchange parameters (the hosted ceremony
+// replays its PKCE verifier here).
+func (f *Flow) Exchange(ctx context.Context, account, redirectURL, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
 	name, err := NormalizeAccount(account)
 	if err != nil {
 		return nil, err
 	}
-	tok, err := f.configFor(redirectURL).Exchange(ctx, code)
+	tok, err := f.configFor(redirectURL).Exchange(ctx, code, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("exchange authorization code: %w", err)
 	}

@@ -54,16 +54,41 @@ func TestLoadClientConfigInstalled(t *testing.T) {
 	}
 }
 
-func TestLoadClientConfigWebClientIsRejected(t *testing.T) {
-	path := writeClientSecret(t, `{"web":{"client_id":"1234","client_secret":"s"}}`)
-	_, err := LoadClientConfig(path)
-	if !errors.Is(err, ErrWebClient) {
-		t.Fatalf("err = %v, want ErrWebClient", err)
+const webClientJSON = `{
+  "web": {
+    "client_id": "5678.apps.googleusercontent.com",
+    "client_secret": "GOCSPX-web-secret",
+    "project_id": "super-cosmic-genius-4aa3b",
+    "auth_uri": "https://accounts.example/auth",
+    "token_uri": "https://accounts.example/token",
+    "redirect_uris": ["https://app.example/oauth/google/callback"]
+  }
+}`
+
+// A Web-application client loads like any other — it runs the hosted ceremony
+// rather than the loopback flow — and the config says which kind it is, so a
+// consumer can pick the ceremony.
+func TestLoadClientConfigWebClient(t *testing.T) {
+	cfg, err := LoadClientConfig(writeClientSecret(t, webClientJSON))
+	if err != nil {
+		t.Fatalf("LoadClientConfig failed: %v", err)
 	}
-	// The path has to be in the message: the human fixes this by re-downloading
-	// a Desktop client over that exact file.
-	if !strings.Contains(err.Error(), path) {
-		t.Errorf("error %q does not name the file", err)
+	if !cfg.Web {
+		t.Error("Web = false for a web client")
+	}
+	if cfg.ClientID != "5678.apps.googleusercontent.com" {
+		t.Errorf("ClientID = %q", cfg.ClientID)
+	}
+	if cfg.ClientSecret != "GOCSPX-web-secret" {
+		t.Errorf("ClientSecret = %q", cfg.ClientSecret)
+	}
+
+	installed, err := LoadClientConfig(writeClientSecret(t, installedClientJSON))
+	if err != nil {
+		t.Fatalf("LoadClientConfig(installed) failed: %v", err)
+	}
+	if installed.Web {
+		t.Error("Web = true for an installed client")
 	}
 }
 
