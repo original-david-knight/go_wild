@@ -137,6 +137,25 @@ func TestParseRejectsWhatItCannotRead(t *testing.T) {
 	}
 }
 
+// TestParseRefusesDoctypeEntities pins the stdlib property this package
+// leans on: encoding/xml never reads a DTD, so a custom entity — the XXE
+// vector — is an unresolvable reference and the document is an error, not a
+// feed with the entity expanded.
+func TestParseRefusesDoctypeEntities(t *testing.T) {
+	const internal = `<?xml version="1.0"?>
+<!DOCTYPE rss [<!ENTITY sneak "expanded">]>
+<rss version="2.0"><channel><title>&sneak;</title><item><guid>g</guid><title>&sneak;</title></item></channel></rss>`
+	if _, err := Parse("u", []byte(internal)); err == nil {
+		t.Error("a DOCTYPE-declared entity resolved instead of erroring")
+	}
+	const external = `<?xml version="1.0"?>
+<!DOCTYPE rss [<!ENTITY sneak SYSTEM "file:///etc/hostname">]>
+<rss version="2.0"><channel><title>&sneak;</title></channel></rss>`
+	if _, err := Parse("u", []byte(external)); err == nil {
+		t.Error("an external entity resolved instead of erroring")
+	}
+}
+
 // ------------------------------------------------------------------- dedupe
 
 func memCache(t *testing.T) *gowild_data.Cache {
