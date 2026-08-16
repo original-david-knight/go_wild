@@ -35,9 +35,14 @@ type Objective struct {
 	// Target/Current/Unit carry measurable progress: "198 → 180 lb" is a
 	// Target of 180, a Current of 197.4 and a Unit of "lb". Objectives with
 	// no measurable target leave them zero and report progress another way.
-	Target      float64        `json:"target"`
-	Current     float64        `json:"current"`
-	Unit        string         `json:"unit"`
+	Target  float64 `json:"target"`
+	Current float64 `json:"current"`
+	Unit    string  `json:"unit"`
+	// Revision counts the writes applied to this node. The store neither sets
+	// nor bumps it: when to count a write is concurrency policy, and policy
+	// belongs to the layer that owns the write path. This column only makes
+	// the count durable.
+	Revision    int            `json:"revision"`
 	Metadata    map[string]any `json:"metadata"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
