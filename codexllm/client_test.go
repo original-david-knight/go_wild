@@ -139,6 +139,50 @@ func TestGenerate_ProfileDoesNotOverrideSandboxMode(t *testing.T) {
 	}
 }
 
+// TestGenerate_ReasoningEffortFlag verifies that ReasoningEffort is passed as
+// `-c model_reasoning_effort="<effort>"` — quoted, as the approval_policy
+// override is, since `-c` values are TOML — and that an empty ReasoningEffort
+// passes no such override, leaving the CLI's own default in force.
+func TestGenerate_ReasoningEffortFlag(t *testing.T) {
+	cases := []struct {
+		name   string
+		effort string
+		want   string // the -c value; "" = override absent
+	}{
+		{name: "empty passes no flag", effort: "", want: ""},
+		{name: "xhigh", effort: "xhigh", want: `model_reasoning_effort="xhigh"`},
+		{name: "low", effort: "low", want: `model_reasoning_effort="low"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			argsFile := filepath.Join(t.TempDir(), "args.txt")
+			stageFakeCodexCaptureArgs(t, argsFile)
+
+			c := &Client{Label: "test", ReasoningEffort: tc.effort}
+			if _, err := c.Generate(context.Background(), "p", ""); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			raw, err := os.ReadFile(argsFile)
+			if err != nil {
+				t.Fatalf("read args file: %v", err)
+			}
+			args := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+			// findFlagValue would return the approval_policy override, the
+			// first -c; look for the effort override specifically.
+			got := ""
+			for i := 0; i+1 < len(args); i++ {
+				if args[i] == "-c" && strings.HasPrefix(args[i+1], "model_reasoning_effort=") {
+					got = args[i+1]
+					break
+				}
+			}
+			if got != tc.want {
+				t.Fatalf("model_reasoning_effort override = %q, want %q (argv=%v)", got, tc.want, args)
+			}
+		})
+	}
+}
+
 // TestGenerate_Success verifies the happy path: the fake codex emits a valid
 // JSONL stream plus some stderr chatter, and Generate returns the final text.
 // Running under -race also covers the stderr goroutine synchronization.

@@ -10,7 +10,7 @@ import (
 var (
 	projectKeyRe = regexp.MustCompile(`^[A-Z]{2,6}$`)
 	itemKeyRe    = regexp.MustCompile(`^([A-Z]{2,6})-([0-9]{1,9})$`)
-	agentNameRe  = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+	agentNameRe  = regexp.MustCompile(`^[a-z0-9]{2,16}$`)
 	mentionRe    = regexp.MustCompile(`(?:^|[^A-Za-z0-9_@])@([a-z][a-z0-9_-]*)`)
 	slugStripRe  = regexp.MustCompile(`[^a-z0-9]+`)
 )
@@ -18,10 +18,31 @@ var (
 // ValidProjectKey reports whether key is 2–6 uppercase ASCII letters.
 func ValidProjectKey(key string) bool { return projectKeyRe.MatchString(key) }
 
-// ValidAgentName reports whether name can be an agent: lowercase, starts
-// with a letter, and is not the owner.
+// ValidAgentName reports whether name can be an agent: 2–16 lowercase
+// letters and digits, and not the owner.
 func ValidAgentName(name string) bool {
 	return name != ActorOwner && agentNameRe.MatchString(name)
+}
+
+// ValidCLI reports whether cli is one the runner can spawn.
+func ValidCLI(cli string) bool { return cli == CLIClaude || cli == CLICodex }
+
+// ValidEffort reports whether effort is one the CLI accepts: low, medium,
+// high or xhigh for either CLI, max for claude only, or "" for the CLI's
+// own default.
+func ValidEffort(cli, effort string) bool {
+	if effort == "" {
+		return true
+	}
+	if effort == EffortMax {
+		return cli == CLIClaude
+	}
+	for _, e := range Efforts {
+		if e == effort {
+			return true
+		}
+	}
+	return false
 }
 
 // ItemKey is the item's human key, "EA-12".

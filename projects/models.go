@@ -84,10 +84,32 @@ const (
 	ActionComplete       = "complete"
 	ActionReopen         = "reopen"
 	ActionClose          = "close"
-	// ActionAssign is the owner handing an open item to one agent, or back
-	// to the shared queue; the status does not move.
+	// ActionAssign is the owner handing an item to another worker; the
+	// status does not move.
 	ActionAssign = "assign"
 )
+
+// Worker CLIs — which command the runner spawns for an agent.
+const (
+	CLIClaude = "claude"
+	CLICodex  = "codex"
+)
+
+// CLIs lists every CLI.
+var CLIs = []string{CLIClaude, CLICodex}
+
+// Effort levels. The first four are valid for either CLI; EffortMax is
+// claude only. An empty effort is the CLI's own default.
+const (
+	EffortLow    = "low"
+	EffortMedium = "medium"
+	EffortHigh   = "high"
+	EffortXHigh  = "xhigh"
+	EffortMax    = "max"
+)
+
+// Efforts lists the effort levels either CLI accepts, lowest first.
+var Efforts = []string{EffortLow, EffortMedium, EffortHigh, EffortXHigh}
 
 // Review verdicts.
 const (
@@ -156,7 +178,10 @@ type Item struct {
 	Description string `json:"description"`
 	Priority    string `json:"priority"`
 	Status      string `json:"status"`
-	// Assignee is the agent holding the item, "" when nobody.
+	// Assignee is the worker holding the item or, while open, the worker it
+	// is assigned to. Every item gets one at creation (the default worker
+	// when none is named); the transitions that hand an item back to the
+	// owner clear it.
 	Assignee string `json:"assignee"`
 	// Implementer is the agent that submitted the branch; it sticks after
 	// submit so the merge job and the reviewer-must-differ rule can find it.
@@ -244,10 +269,25 @@ type ChatMessage struct {
 // TableName pins the table name against a later model rename.
 func (ChatMessage) TableName() string { return "project_chat" }
 
-// Agent is one coding agent's row: whether it may take work, and what it
-// was last seen doing. ID is the agent's name.
+// Agent is one worker: a model behind a CLI, with a short handle. ID is the
+// handle — the bearer identity, the timer instance and the @mention. Rows
+// are the owner's data: created through CreateAgent, never by a check-in.
 type Agent struct {
-	ID            string    `json:"id"`
+	ID string `json:"id"`
+	// Label is what the UI shows; it defaults to the name.
+	Label string `json:"label"`
+	// CLI is which command the runner spawns: CLIClaude or CLICodex.
+	CLI string `json:"cli"`
+	// Model is handed to the CLI as-is: a Claude Code alias or a Codex model
+	// name. No code spells a model ID; this column is where they live.
+	Model string `json:"model"`
+	// Effort is one of Efforts for either CLI, EffortMax for claude only, or
+	// "" for the CLI's own default.
+	Effort string `json:"effort"`
+	// IsDefault marks the worker an item goes to when it is filed without an
+	// assignee. Exactly one row carries it once any row exists; it moves,
+	// it is never cleared.
+	IsDefault     bool      `json:"is_default"`
 	Enabled       bool      `json:"enabled"`
 	LastSeenAt    time.Time `json:"last_seen_at"`
 	CurrentItemID string    `json:"current_item_id"`

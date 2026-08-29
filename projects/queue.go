@@ -56,7 +56,8 @@ type candidate struct {
 
 // CheckIn records the agent as seen and returns its next job, or nil when
 // there is nothing. With claim the item is claimed (or the mention's attempt
-// counted) before it is returned, atomically under the service's mutex.
+// counted) before it is returned, atomically under the service's mutex. A
+// name with no row is ErrNotFound: a check-in never creates a worker.
 func (s *Service) CheckIn(ctx context.Context, agent string, claim bool) (*Job, error) {
 	db, err := s.database()
 	if err != nil {
@@ -64,7 +65,7 @@ func (s *Service) CheckIn(ctx context.Context, agent string, claim bool) (*Job, 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	a, err := s.ensureAgent(ctx, db, agent)
+	a, err := s.agentByName(ctx, db, agent)
 	if err != nil {
 		return nil, err
 	}
@@ -198,32 +199,32 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 		out = append(out, candidate{kind: JobReview, item: it, project: p})
 	}
 
-	// 3 and 4. In-progress work: mine first, then anything whose holder is
-	// past its lease.
-	inProgress, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{Where: map[string]any{"status": StatusInProgress}})
+	// 3. In-progress work of mine whose lease is not live: changes
+	// requested, or my own runner died. Another worker's item is never
+	// offered, whatever the state of its lease.
+	inProgress, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{
+		Where: map[string]any{"status": StatusInProgress, "assignee": agent},
+	})
 	if err != nil {
 		return nil, err
 	}
 	SortItems(inProgress)
 	for _, it := range inProgress {
-		if p := workable(it.ProjectID); p != nil && it.Assignee == agent && !leaseLive(it, now) {
-			out = append(out, candidate{kind: JobImplement, item: it, project: p})
-		}
-	}
-	for _, it := range inProgress {
-		if p := workable(it.ProjectID); p != nil && it.Assignee != agent && LeaseExpired(it, now) {
+		if p := workable(it.ProjectID); p != nil && !leaseLive(it, now) {
 			out = append(out, candidate{kind: JobImplement, item: it, project: p})
 		}
 	}
 
-	// 5. Open work nobody holds.
-	open, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{Where: map[string]any{"status": StatusOpen}})
+	// 4. Open work assigned to me.
+	open, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{
+		Where: map[string]any{"status": StatusOpen, "assignee": agent},
+	})
 	if err != nil {
 		return nil, err
 	}
 	SortItems(open)
 	for _, it := range open {
-		if p := workable(it.ProjectID); p != nil && (it.Assignee == "" || it.Assignee == agent) {
+		if p := workable(it.ProjectID); p != nil {
 			out = append(out, candidate{kind: JobImplement, item: it, project: p})
 		}
 	}

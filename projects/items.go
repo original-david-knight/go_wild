@@ -2,6 +2,7 @@ package gowild_projects
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -18,8 +19,8 @@ type ItemInput struct {
 	Description string
 	Priority    string
 	CreatedBy   string
-	// Assignee hands the item to one agent from the start; "" leaves it to
-	// whichever agent checks in first.
+	// Assignee hands the item to one worker from the start; "" stamps the
+	// default worker.
 	Assignee string
 }
 
@@ -30,8 +31,9 @@ type ItemPatch struct {
 	Description *string
 	Type        *string
 	Priority    *string
-	// Assignee reassigns an open item: an agent name, or "" for the shared
-	// queue. Any other status refuses it — the holder of in-progress work is
+	// Assignee reassigns an item to another worker, never to nobody. It is
+	// accepted while the item is open, or in progress with an expired lease
+	// (the holder's runner died); any other status refuses it — live work is
 	// not the owner's to swap.
 	Assignee *string
 }
@@ -91,6 +93,26 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 	if err != nil {
 		return nil, err
 	}
+	// Every item has a worker: the one named, else the default. Only a
+	// named assignee is a hand-off in the feed; the default is stamped.
+	named := in.Assignee != ""
+	if named {
+		if _, err := s.agentByName(ctx, db, in.Assignee); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return nil, validationf("assignee %q is not a worker", in.Assignee)
+			}
+			return nil, err
+		}
+	} else {
+		def, err := s.defaultAgent(ctx, db)
+		if err != nil {
+			return nil, err
+		}
+		if def == nil {
+			return nil, validationf("there is no worker to assign the item to; create an agent first")
+		}
+		in.Assignee = def.ID
+	}
 	now := s.Now()
 	number := p.NextNumber
 	if number < 1 {
@@ -109,7 +131,7 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 	if err := db.Table(Item{}).Insert(ctx, it); err != nil {
 		return nil, err
 	}
-	if in.Assignee != "" {
+	if named {
 		if err := s.recordAssign(ctx, db, it, in.CreatedBy, in.Assignee, now); err != nil {
 			return nil, err
 		}
@@ -257,28 +279,54 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 		}
 		it.Priority = *patch.Priority
 	}
-	assignTo, assignChanged := "", false
+	now := s.Now()
+	assignTo, assignFrom, assignChanged := "", "", false
 	if patch.Assignee != nil {
 		assignTo = strings.TrimSpace(*patch.Assignee)
-		if assignTo != "" && !ValidAgentName(assignTo) {
+		if assignTo == "" {
+			return nil, validationf("assignee is required; every item has a worker")
+		}
+		if !ValidAgentName(assignTo) {
 			return nil, validationf("assignee %q is not an agent name", assignTo)
 		}
 		if assignTo != it.Assignee {
-			if it.Status != StatusOpen {
-				return nil, invalidf("only an open item is reassigned; this one is %s", it.Status)
+			switch {
+			case it.Status == StatusOpen:
+			case it.Status == StatusInProgress && LeaseExpired(it, now):
+				// The holder's runner died. The item keeps its branch and
+				// implementer and resumes under the new worker from its
+				// next check-in; the dead holder's lease goes.
+				assignFrom = it.Assignee
+				it.ClaimedAt = time.Time{}
+				it.LeaseExpiresAt = time.Time{}
+			case it.Status == StatusInProgress:
+				return nil, invalidf("%s holds this item and its lease has not expired", it.Assignee)
+			default:
+				return nil, invalidf("only an open item, or an in-progress one whose lease expired, is reassigned; this one is %s", it.Status)
+			}
+			if _, err := s.agentByName(ctx, db, assignTo); err != nil {
+				if errors.Is(err, ErrNotFound) {
+					return nil, validationf("assignee %q is not a worker", assignTo)
+				}
+				return nil, err
 			}
 			it.Assignee = assignTo
 			assignChanged = true
 		}
 	}
 	it.Revision++
-	it.UpdatedAt = s.Now()
+	it.UpdatedAt = now
 	if err := db.Table(Item{}).Update(ctx, it); err != nil {
 		return nil, err
 	}
 	if assignChanged {
-		if err := s.recordAssign(ctx, db, it, ActorOwner, assignTo, it.UpdatedAt); err != nil {
+		if err := s.recordAssign(ctx, db, it, ActorOwner, assignTo, now); err != nil {
 			return nil, err
+		}
+		if assignFrom != "" {
+			if err := s.setAgentCurrent(ctx, db, assignFrom, ""); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if patch.Description != nil {
@@ -290,16 +338,12 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 }
 
 // recordAssign puts the hand-off in the feed as a transition that moves no
-// status: "assigned to claude" or "returned to the queue".
+// status: "assigned to fable".
 func (s *Service) recordAssign(ctx context.Context, db gowild_data.Database, it *Item, actor, assignee string, now time.Time) error {
-	body := "returned to the queue"
-	if assignee != "" {
-		body = "assigned to " + assignee
-	}
 	c := &Comment{
 		ID: newID(), TargetKind: TargetItem, TargetID: it.ID, Author: actor,
 		Kind: CommentKindTransition, Action: ActionAssign, FromStatus: it.Status, ToStatus: it.Status,
-		Body: body, CreatedAt: now,
+		Body: "assigned to " + assignee, CreatedAt: now,
 	}
 	return db.Table(Comment{}).Insert(ctx, c)
 }
@@ -371,6 +415,11 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		if isOwner {
 			return nil, forbiddenf("the owner does not claim work")
 		}
+		// Only a worker the owner created claims; a claim never creates
+		// the row.
+		if _, err := s.agentByName(ctx, db, actor); err != nil {
+			return nil, err
+		}
 		held, err := s.liveLeaseForAgent(ctx, db, actor, now)
 		if err != nil {
 			return nil, err
@@ -391,11 +440,12 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			if leaseLive(it, now) {
 				return nil, invalidf("held by %s until %s", it.Assignee, it.LeaseExpiresAt.Format(time.RFC3339))
 			}
-			if it.Assignee != actor && it.Assignee != "" {
-				clearFor = it.Assignee
+			// An expired lease is a dead runner; the work stays with its
+			// worker until the owner reassigns it.
+			if it.Assignee != actor {
+				return nil, forbiddenf("assigned to %s", it.Assignee)
 			}
 			to = StatusInProgress
-			it.Assignee = actor
 			lease()
 			holdBy = actor
 		case StatusInReview:
@@ -431,8 +481,8 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			if it.Assignee != actor {
 				return nil, forbiddenf("held by %s", it.Assignee)
 			}
+			// The worker keeps the item: its next check-in retries it.
 			to = StatusOpen
-			it.Assignee = ""
 			clearLease()
 			clearFor = actor
 		case StatusInReview:
@@ -524,8 +574,9 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		if body == "" {
 			return nil, validationf("block needs the question for the owner")
 		}
+		// Blocked, not held: the assignee stays so reopen returns the item
+		// to the same worker, but the lease and the agent's current item go.
 		to = StatusBlocked
-		it.Assignee = ""
 		clearLease()
 		clearFor = actor
 	case ActionApprove:
@@ -579,7 +630,21 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			return nil, invalidf("cannot reopen from %s", from)
 		}
 		to = StatusOpen
-		it.Assignee = ""
+		if it.Assignee == "" {
+			// A done or closed item lost its holder on the way out: it goes
+			// back to its implementer, else to the default worker.
+			it.Assignee = it.Implementer
+			if it.Assignee == "" {
+				def, err := s.defaultAgent(ctx, db)
+				if err != nil {
+					return nil, err
+				}
+				if def == nil {
+					return nil, validationf("there is no worker to reopen the item for; create an agent first")
+				}
+				it.Assignee = def.ID
+			}
+		}
 		it.Reviewer = ""
 		it.ClosedAt = time.Time{}
 		clearLease()

@@ -15,6 +15,7 @@ import (
 // Client wraps the `claude` CLI for text generation.
 type Client struct {
 	Model           string        // e.g. "opus", "sonnet"
+	Effort          string        // low, medium, high, xhigh, max; "" passes no flag
 	MCPConfigPath   string        // optional path to MCP server config JSON
 	AllowedTools    string        // optional comma-separated list of allowed tools
 	Tools           []string      // nil = default built-ins, empty = disable built-ins
@@ -50,6 +51,9 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 	if c.Model != "" {
 		args = append(args, "--model", c.Model)
 	}
+	if c.Effort != "" {
+		args = append(args, "--effort", c.Effort)
+	}
 	if strings.TrimSpace(systemPrompt) != "" {
 		args = append(args, "--system-prompt", strings.TrimSpace(systemPrompt))
 	}
@@ -76,7 +80,7 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 		args = append(args, "--settings", fmt.Sprintf(`{"outputStyle":"%s"}`, strings.TrimSpace(c.OutputStylePath)))
 	}
 
-	log.Printf("[%s] starting claude CLI (model=%s, prompt_len=%d)", label, c.Model, len(prompt))
+	log.Printf("[%s] starting claude CLI (model=%s, effort=%s, prompt_len=%d)", label, c.Model, c.Effort, len(prompt))
 	started := time.Now()
 
 	cmd := exec.CommandContext(ctx, bin, args...)

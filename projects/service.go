@@ -284,29 +284,72 @@ func (s *Service) Counts(ctx context.Context, projectID string) (map[string]int,
 
 // ------------------------------------------------------------------ agents
 
-// EnsureAgent returns the agent's row, creating it enabled when absent.
-func (s *Service) EnsureAgent(ctx context.Context, name string) (*Agent, error) {
+// AgentInput is what creating a worker takes. Label defaults to Name; Model
+// is required; Effort may be "".
+type AgentInput struct {
+	Name   string
+	Label  string
+	CLI    string
+	Model  string
+	Effort string
+}
+
+// AgentPatch is a partial update; nil fields are left alone. IsDefault true
+// moves the default here; false is refused, since the default is moved, not
+// cleared.
+type AgentPatch struct {
+	Enabled   *bool
+	Label     *string
+	CLI       *string
+	Model     *string
+	Effort    *string
+	IsDefault *bool
+}
+
+// CreateAgent inserts a worker. The name must be unused. The row becomes
+// the default when no row is the default yet, so the first worker created
+// is the default.
+func (s *Service) CreateAgent(ctx context.Context, in AgentInput) (*Agent, error) {
 	db, err := s.database()
 	if err != nil {
 		return nil, err
 	}
+	in.Name = strings.TrimSpace(in.Name)
+	if !ValidAgentName(in.Name) {
+		return nil, validationf("agent name %q is not 2–16 lowercase letters and digits", in.Name)
+	}
+	in.Label = strings.TrimSpace(in.Label)
+	if in.Label == "" {
+		in.Label = in.Name
+	}
+	if !ValidCLI(in.CLI) {
+		return nil, validationf("cli %q is not claude or codex", in.CLI)
+	}
+	in.Model = strings.TrimSpace(in.Model)
+	if in.Model == "" {
+		return nil, validationf("model is required")
+	}
+	in.Effort = strings.TrimSpace(in.Effort)
+	if !ValidEffort(in.CLI, in.Effort) {
+		return nil, validationf("effort %q is not low, medium, high, xhigh, max (claude only) or empty", in.Effort)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.ensureAgent(ctx, db, name)
-}
-
-func (s *Service) ensureAgent(ctx context.Context, db gowild_data.Database, name string) (*Agent, error) {
-	if !ValidAgentName(name) {
-		return nil, validationf("agent name %q is not lowercase letters, digits, - or _", name)
-	}
-	a, err := gowild_dbx.Get[Agent](ctx, db, name)
+	existing, err := gowild_dbx.Get[Agent](ctx, db, in.Name)
 	if err != nil {
 		return nil, err
 	}
-	if a != nil {
-		return a, nil
+	if existing != nil {
+		return nil, fmt.Errorf("%w: agent %s exists", ErrConflict, in.Name)
 	}
-	a = &Agent{ID: name, Enabled: true, CreatedAt: s.Now()}
+	def, err := s.defaultAgent(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	a := &Agent{
+		ID: in.Name, Label: in.Label, CLI: in.CLI, Model: in.Model, Effort: in.Effort,
+		IsDefault: def == nil, Enabled: true, CreatedAt: s.Now(),
+	}
 	if err := db.Table(Agent{}).Insert(ctx, a); err != nil {
 		return nil, err
 	}
@@ -319,17 +362,44 @@ func (s *Service) GetAgent(ctx context.Context, name string) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	return s.agentByName(ctx, db, name)
+}
+
+func (s *Service) agentByName(ctx context.Context, db gowild_data.Database, name string) (*Agent, error) {
 	a, err := gowild_dbx.Get[Agent](ctx, db, name)
 	if err != nil {
 		return nil, err
 	}
 	if a == nil {
-		return nil, fmt.Errorf("%w: agent %s", ErrNotFound, name)
+		return nil, fmt.Errorf("%w: no worker named %s", ErrNotFound, name)
 	}
 	return a, nil
 }
 
-// ListAgents returns every agent by name.
+// DefaultAgent returns the worker that takes items filed without an
+// assignee, or nil when no row is the default (no worker exists yet).
+func (s *Service) DefaultAgent(ctx context.Context) (*Agent, error) {
+	db, err := s.database()
+	if err != nil {
+		return nil, err
+	}
+	return s.defaultAgent(ctx, db)
+}
+
+func (s *Service) defaultAgent(ctx context.Context, db gowild_data.Database) (*Agent, error) {
+	rows, err := gowild_dbx.All[Agent](ctx, db, gowild_data.QueryOpts{})
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range rows {
+		if a.IsDefault {
+			return a, nil
+		}
+	}
+	return nil, nil
+}
+
+// ListAgents returns every agent, the default first, then by name.
 func (s *Service) ListAgents(ctx context.Context) ([]*Agent, error) {
 	db, err := s.database()
 	if err != nil {
@@ -339,34 +409,133 @@ func (s *Service) ListAgents(ctx context.Context) ([]*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].IsDefault != rows[j].IsDefault {
+			return rows[i].IsDefault
+		}
+		return rows[i].ID < rows[j].ID
+	})
 	return rows, nil
 }
 
-// SetAgentEnabled flips the pause switch, creating the row if needed.
-func (s *Service) SetAgentEnabled(ctx context.Context, name string, enabled bool) (*Agent, error) {
+// UpdateAgent applies a patch. Moving the default clears every other row's
+// flag in the same transaction.
+func (s *Service) UpdateAgent(ctx context.Context, name string, patch AgentPatch) (*Agent, error) {
 	db, err := s.database()
 	if err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	a, err := s.ensureAgent(ctx, db, name)
+	a, err := s.agentByName(ctx, db, name)
 	if err != nil {
 		return nil, err
 	}
-	a.Enabled = enabled
-	if err := db.Table(Agent{}).Update(ctx, a); err != nil {
+	if patch.Enabled != nil {
+		a.Enabled = *patch.Enabled
+	}
+	if patch.Label != nil {
+		a.Label = strings.TrimSpace(*patch.Label)
+		if a.Label == "" {
+			a.Label = a.ID
+		}
+	}
+	if patch.CLI != nil {
+		if !ValidCLI(*patch.CLI) {
+			return nil, validationf("cli %q is not claude or codex", *patch.CLI)
+		}
+		a.CLI = *patch.CLI
+	}
+	if patch.Model != nil {
+		a.Model = strings.TrimSpace(*patch.Model)
+		if a.Model == "" {
+			return nil, validationf("model is required")
+		}
+	}
+	if patch.Effort != nil {
+		a.Effort = strings.TrimSpace(*patch.Effort)
+	}
+	if (patch.CLI != nil || patch.Effort != nil) && !ValidEffort(a.CLI, a.Effort) {
+		return nil, validationf("effort %q is not low, medium, high, xhigh, max (claude only) or empty", a.Effort)
+	}
+	moveDefault := false
+	if patch.IsDefault != nil {
+		if !*patch.IsDefault {
+			return nil, fmt.Errorf("%w: the default worker is moved, not cleared; make another worker the default", ErrConflict)
+		}
+		moveDefault = !a.IsDefault
+	}
+	if !moveDefault {
+		if err := db.Table(Agent{}).Update(ctx, a); err != nil {
+			return nil, err
+		}
+		return a, nil
+	}
+	err = db.RunInTransaction(ctx, func(tx gowild_data.Database) error {
+		rows, err := gowild_dbx.All[Agent](ctx, tx, gowild_data.QueryOpts{})
+		if err != nil {
+			return err
+		}
+		for _, other := range rows {
+			if other.ID == a.ID || !other.IsDefault {
+				continue
+			}
+			other.IsDefault = false
+			if err := tx.Table(Agent{}).Update(ctx, other); err != nil {
+				return err
+			}
+		}
+		a.IsDefault = true
+		return tx.Table(Agent{}).Update(ctx, a)
+	})
+	if err != nil {
 		return nil, err
 	}
 	return a, nil
 }
 
-// setAgentCurrent records what an agent holds; "" clears it. Missing rows
-// are created so a transition by a never-seen agent still leaves a trace.
-func (s *Service) setAgentCurrent(ctx context.Context, db gowild_data.Database, name, itemID string) error {
-	a, err := s.ensureAgent(ctx, db, name)
+// DeleteAgent removes a worker. It refuses while the row is the default,
+// holds an item, or is the assignee of any item that is not done or closed.
+func (s *Service) DeleteAgent(ctx context.Context, name string) error {
+	db, err := s.database()
 	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, err := s.agentByName(ctx, db, name)
+	if err != nil {
+		return err
+	}
+	if a.IsDefault {
+		return fmt.Errorf("%w: %s is the default worker; make another worker the default first", ErrConflict, name)
+	}
+	if a.CurrentItemID != "" {
+		return fmt.Errorf("%w: %s holds an item", ErrConflict, name)
+	}
+	assigned, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{Where: map[string]any{"assignee": name}})
+	if err != nil {
+		return err
+	}
+	for _, it := range assigned {
+		if it.Status != StatusDone && it.Status != StatusClosed {
+			return fmt.Errorf("%w: %s is the assignee of an item that is not done or closed; reassign it first", ErrConflict, name)
+		}
+	}
+	return db.Table(Agent{}).Delete(ctx, name)
+}
+
+// SetAgentEnabled flips the pause switch.
+func (s *Service) SetAgentEnabled(ctx context.Context, name string, enabled bool) (*Agent, error) {
+	return s.UpdateAgent(ctx, name, AgentPatch{Enabled: &enabled})
+}
+
+// setAgentCurrent records what an agent holds; "" clears it. A row that no
+// longer exists (a worker deleted after implementing an item that was still
+// approved) has nothing to record.
+func (s *Service) setAgentCurrent(ctx context.Context, db gowild_data.Database, name, itemID string) error {
+	a, err := gowild_dbx.Get[Agent](ctx, db, name)
+	if err != nil || a == nil {
 		return err
 	}
 	a.CurrentItemID = itemID

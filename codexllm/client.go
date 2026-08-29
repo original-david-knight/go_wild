@@ -28,6 +28,10 @@ import (
 // for details.
 type Client struct {
 	Model string // e.g. "gpt-5.4", "o3" — overrides profile/config default
+	// ReasoningEffort is passed as `-c model_reasoning_effort="<effort>"`.
+	// Valid values: "low", "medium", "high", "xhigh"; "" passes no flag and
+	// leaves the CLI's own default in force.
+	ReasoningEffort string
 	// Profile is the config.toml profile name (e.g. "research") supplying model
 	// and other settings. NOTE: Generate() always passes an explicit `-s` flag,
 	// so the profile's sandbox_mode setting is effectively ignored by this
@@ -124,9 +128,12 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 	if c.Model != "" {
 		args = append(args, "-m", c.Model)
 	}
+	if c.ReasoningEffort != "" {
+		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=\"%s\"", c.ReasoningEffort))
+	}
 	args = append(args, fullPrompt)
 
-	log.Printf("[%s] starting codex CLI (profile=%s, model=%s, prompt_len=%d)", label, c.Profile, c.Model, len(fullPrompt))
+	log.Printf("[%s] starting codex CLI (profile=%s, model=%s, effort=%s, prompt_len=%d)", label, c.Profile, c.Model, c.ReasoningEffort, len(fullPrompt))
 	started := time.Now()
 
 	cmd := exec.CommandContext(ctx, bin, args...)

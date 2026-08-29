@@ -49,6 +49,10 @@ type Run struct {
 	Summary string `json:"summary"`
 	// OutputTail is the last OutputTailMax runes of the agent's output.
 	OutputTail string `json:"output_tail"`
+	// Model and Effort are what the runner launched, copied from the agent
+	// row at check-in, so a worker can be retuned without rewriting history.
+	Model  string `json:"model"`
+	Effort string `json:"effort"`
 	// Token and cost columns are filled once the runners report them; zero
 	// until then.
 	InputTokens  int     `json:"input_tokens"`
@@ -59,7 +63,8 @@ type Run struct {
 // TableName pins the table name against a later model rename.
 func (Run) TableName() string { return "project_runs" }
 
-// RunInput starts a run.
+// RunInput starts a run. Model and Effort are what the runner is about to
+// launch, as the agent row said at check-in.
 type RunInput struct {
 	Agent     string
 	Kind      string
@@ -68,6 +73,8 @@ type RunInput struct {
 	ProjectID string
 	Branch    string
 	Worktree  string
+	Model     string
+	Effort    string
 }
 
 // RunResult finishes a run.
@@ -109,7 +116,8 @@ func (s *Service) StartRun(ctx context.Context, in RunInput) (*Run, error) {
 	}
 	run := &Run{
 		ID: newID(), Agent: in.Agent, Kind: in.Kind, ItemID: in.ItemID, MentionID: in.MentionID,
-		ProjectID: in.ProjectID, Branch: in.Branch, Worktree: in.Worktree, StartedAt: s.Now(),
+		ProjectID: in.ProjectID, Branch: in.Branch, Worktree: in.Worktree,
+		Model: strings.TrimSpace(in.Model), Effort: strings.TrimSpace(in.Effort), StartedAt: s.Now(),
 	}
 	if err := db.Table(Run{}).Insert(ctx, run); err != nil {
 		return nil, err
