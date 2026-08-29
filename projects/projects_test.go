@@ -111,6 +111,7 @@ func TestHappyPathMergePolicy(t *testing.T) {
 	}
 	// The other agent cannot take a live claim.
 	f.refuse("EA-1", TransitionInput{Actor: "codex", Action: ActionClaim}, ErrInvalidTransition)
+	f.refuse("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim}, ErrInvalidTransition)
 	f.refuse("EA-1", TransitionInput{Actor: "claude", Action: ActionSubmit}, ErrValidation) // no branch
 
 	it = f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionSubmit, Branch: "pm/ea-1-fix", Body: "done"})
@@ -125,6 +126,7 @@ func TestHappyPathMergePolicy(t *testing.T) {
 	if it.Reviewer != "codex" || it.Status != StatusInReview {
 		t.Fatalf("review claim: %+v", it)
 	}
+	f.refuse("EA-1", TransitionInput{Actor: "codex", Action: ActionClaim}, ErrInvalidTransition)
 	f.refuse("EA-1", TransitionInput{Actor: "codex", Action: ActionReview, Verdict: VerdictRequestChanges}, ErrValidation) // no body
 	it = f.move("EA-1", TransitionInput{Actor: "codex", Action: ActionReview, Verdict: VerdictRequestChanges, Body: "tests missing"})
 	if it.Status != StatusInProgress || it.Assignee != "claude" || it.LastVerdict != VerdictRequestChanges || it.LastVerdictBy != "codex" {
@@ -149,6 +151,7 @@ func TestHappyPathMergePolicy(t *testing.T) {
 	f.refuse("EA-1", TransitionInput{Actor: "codex", Action: ActionComplete}, ErrForbidden)
 	f.refuse("EA-1", TransitionInput{Actor: "codex", Action: ActionClaim}, ErrForbidden)
 	f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim})
+	f.refuse("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim}, ErrInvalidTransition)
 	it = f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionComplete, Body: "merged"})
 	if it.Status != StatusDone || it.ClosedAt.IsZero() {
 		t.Fatalf("complete: %+v", it)
@@ -274,10 +277,10 @@ func TestCheckInQueueOrder(t *testing.T) {
 	if job.Project == nil || job.Project.Key != "EA" || job.Pinned == nil || job.Chat == nil || job.Comments == nil {
 		t.Fatalf("job context: %+v", job)
 	}
-	// Checking in again resumes my own in-progress work rather than taking more.
+	// A live runner gets no second job, including its own item.
 	job, err = f.s.CheckIn(f.ctx, "claude", true)
-	if err != nil || job.Kind != JobImplement || job.Item.ID != urgent.ID {
-		t.Fatalf("resume: %v %+v", err, job)
+	if err != nil || job != nil {
+		t.Fatalf("duplicate live job: %v %+v", err, job)
 	}
 	// Codex gets the other open item, not claude's.
 	job, err = f.s.CheckIn(f.ctx, "codex", true)
@@ -290,16 +293,16 @@ func TestCheckInQueueOrder(t *testing.T) {
 		t.Fatalf("empty queue: %v %+v", err, job)
 	}
 
-	// Claude submits; codex's next job is the review, ahead of its own work.
+	// Claude submits, but codex cannot take the review while its own lease is live.
 	f.move("EA-2", TransitionInput{Actor: "claude", Action: ActionSubmit, Branch: "pm/ea-2"})
+	job, err = f.s.CheckIn(f.ctx, "codex", true)
+	if err != nil || job != nil {
+		t.Fatalf("codex duplicate live job: %v %+v", err, job)
+	}
+	f.move("EA-1", TransitionInput{Actor: "codex", Action: ActionRelease})
 	job, err = f.s.CheckIn(f.ctx, "codex", true)
 	if err != nil || job.Kind != JobReview || job.Item.ID != urgent.ID || job.Item.Reviewer != "codex" {
 		t.Fatalf("review job: %v %+v", err, job)
-	}
-	// Claude cannot be handed its own review; it gets nothing (its item is under review, codex holds EA-1).
-	job, err = f.s.CheckIn(f.ctx, "claude", true)
-	if err != nil || job != nil {
-		t.Fatalf("claude idle: %v %+v", err, job)
 	}
 	f.move("EA-2", TransitionInput{Actor: "codex", Action: ActionReview, Verdict: VerdictApprove, Body: "fine"})
 	f.move("EA-2", TransitionInput{Actor: ActorOwner, Action: ActionApprove})
@@ -313,6 +316,11 @@ func TestCheckInQueueOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	job, err = f.s.NextFor(f.ctx, "claude")
+	if err != nil || job != nil {
+		t.Fatalf("live merge job offered again: %v %+v", err, job)
+	}
+	f.tick(DefaultLease + time.Minute)
+	job, err = f.s.NextFor(f.ctx, "claude")
 	if err != nil || job.Kind != JobPullRequest {
 		t.Fatalf("pr job: %v %+v", err, job)
 	}
@@ -323,6 +331,9 @@ func TestLeaseExpiryReassigns(t *testing.T) {
 	f.project("EA")
 	f.item("EA", "stuck")
 	f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim})
+	if job, _ := f.s.NextFor(f.ctx, "claude"); job != nil {
+		t.Fatalf("live lease offered again to holder: %+v", job)
+	}
 	if job, _ := f.s.NextFor(f.ctx, "codex"); job != nil {
 		t.Fatalf("live lease offered to codex: %+v", job)
 	}
@@ -334,6 +345,19 @@ func TestLeaseExpiryReassigns(t *testing.T) {
 	a, _ := f.s.GetAgent(f.ctx, "claude")
 	if a.CurrentItemID != "" {
 		t.Fatalf("claude still marked holding %s", a.CurrentItemID)
+	}
+}
+
+func TestAgentCannotClaimTwoLiveItems(t *testing.T) {
+	f := newFixture(t)
+	f.project("EA")
+	f.item("EA", "first")
+	f.item("EA", "second")
+	f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim})
+	f.refuse("EA-2", TransitionInput{Actor: "claude", Action: ActionClaim}, ErrInvalidTransition)
+	f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionRelease})
+	if it := f.move("EA-2", TransitionInput{Actor: "claude", Action: ActionClaim}); it.Assignee != "claude" {
+		t.Fatalf("claim after release: %+v", it)
 	}
 }
 
@@ -447,6 +471,68 @@ func TestBoardAndChat(t *testing.T) {
 	if len(last1) != 1 || last1[0].ID != m3.ID {
 		t.Fatalf("limit: %+v", last1)
 	}
+}
+
+func TestChatCursorWithUnchangedClock(t *testing.T) {
+	f := newFixture(t)
+	f.project("EA")
+	first, err := f.s.PostChat(f.ctx, "EA", ActorOwner, "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.s.PostChat(f.ctx, "EA", ActorOwner, "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.CreatedAt.After(first.CreatedAt) {
+		t.Fatalf("chat timestamps did not advance: %s then %s", first.CreatedAt, second.CreatedAt)
+	}
+	after, err := f.s.ListChat(f.ctx, "EA", first.ID, 50)
+	if err != nil || len(after) != 1 || after[0].ID != second.ID {
+		t.Fatalf("after cursor: %v %+v", err, after)
+	}
+}
+
+func TestEditedSourcesSynchronizeMentions(t *testing.T) {
+	t.Run("item description", func(t *testing.T) {
+		f := newFixture(t)
+		f.project("EA")
+		it, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "q", Description: "ask @claude"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := "ask @codex instead"
+		if _, err := f.s.UpdateItem(f.ctx, "EA-1", ItemPatch{Description: &body}, it.Revision); err != nil {
+			t.Fatal(err)
+		}
+		if old, _ := f.s.UnansweredMentions(f.ctx, "claude"); len(old) != 0 {
+			t.Fatalf("removed mention remains: %+v", old)
+		}
+		added, err := f.s.UnansweredMentions(f.ctx, "codex")
+		if err != nil || len(added) != 1 || added[0].SourceKind != "item" || added[0].SourceID != it.ID {
+			t.Fatalf("added mention: %v %+v", err, added)
+		}
+	})
+
+	t.Run("post body", func(t *testing.T) {
+		f := newFixture(t)
+		f.project("EA")
+		post, err := f.s.CreatePost(f.ctx, "EA", PostInput{Author: ActorOwner, Title: "q", Body: "ask @claude"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := "ask @codex instead"
+		if _, err := f.s.UpdatePost(f.ctx, post.ID, ActorOwner, PostPatch{Body: &body}); err != nil {
+			t.Fatal(err)
+		}
+		if old, _ := f.s.UnansweredMentions(f.ctx, "claude"); len(old) != 0 {
+			t.Fatalf("removed mention remains: %+v", old)
+		}
+		added, err := f.s.UnansweredMentions(f.ctx, "codex")
+		if err != nil || len(added) != 1 || added[0].SourceKind != "post" || added[0].SourceID != post.ID {
+			t.Fatalf("added mention: %v %+v", err, added)
+		}
+	})
 }
 
 func TestMentionsBecomeRespondJobs(t *testing.T) {

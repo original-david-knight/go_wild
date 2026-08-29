@@ -209,7 +209,7 @@ func (s *Service) UpdatePost(ctx context.Context, id, actor string, patch PostPa
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	post, _, err := s.postByID(ctx, db, id)
+	post, p, err := s.postByID(ctx, db, id)
 	if err != nil {
 		return nil, err
 	}
@@ -235,6 +235,11 @@ func (s *Service) UpdatePost(ctx context.Context, id, actor string, patch PostPa
 	post.UpdatedAt = s.Now()
 	if err := db.Table(Post{}).Update(ctx, post); err != nil {
 		return nil, err
+	}
+	if patch.Body != nil {
+		if err := s.syncMentions(ctx, db, post.Body, RoomPost, post.ID, p.ID, "post", post.ID, actor, post.UpdatedAt); err != nil {
+			return nil, err
+		}
 	}
 	return post, nil
 }
@@ -321,6 +326,15 @@ func (s *Service) postChat(ctx context.Context, projectKey, author, body string,
 		return nil, err
 	}
 	now := s.Now()
+	previous, err := gowild_dbx.All[ChatMessage](ctx, db, gowild_data.QueryOpts{
+		Where: map[string]any{"project_id": projectID}, OrderBy: "created_at", OrderDesc: true, Limit: 1,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(previous) > 0 && !now.After(previous[0].CreatedAt) {
+		now = previous[0].CreatedAt.Add(time.Microsecond)
+	}
 	m := &ChatMessage{ID: newID(), ProjectID: projectID, Author: author, Body: body, CreatedAt: now}
 	if !notice {
 		m.Mentions = joinMentions(ExtractMentions(body))
@@ -374,7 +388,7 @@ func (s *Service) ListChat(ctx context.Context, projectKey, afterID string, limi
 		}
 		kept := rows[:0]
 		for _, m := range rows {
-			if m.CreatedAt.After(anchor) {
+			if m.ID != afterID && !m.CreatedAt.Before(anchor) {
 				kept = append(kept, m)
 			}
 		}
@@ -415,7 +429,12 @@ func (s *Service) roomMessages(ctx context.Context, db gowild_data.Database, pro
 	if err != nil {
 		return nil, err
 	}
-	sort.SliceStable(rows, func(i, j int) bool { return rows[i].CreatedAt.Before(rows[j].CreatedAt) })
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].CreatedAt.Equal(rows[j].CreatedAt) {
+			return rows[i].ID < rows[j].ID
+		}
+		return rows[i].CreatedAt.Before(rows[j].CreatedAt)
+	})
 	return rows, nil
 }
 
@@ -425,8 +444,56 @@ func (s *Service) roomMessages(ctx context.Context, db gowild_data.Database, pro
 // author mentioning themself. Unknown names are recorded too: the queue
 // only ever serves rows to the agent they name, so a stray @bob is inert.
 func (s *Service) recordMentions(ctx context.Context, db gowild_data.Database, body, room, roomID, projectID, sourceKind, sourceID, author string, now time.Time) error {
-	for _, name := range ExtractMentions(body) {
-		if name == author || name == ActorOwner {
+	for _, name := range mentionNames(body, author) {
+		m := &Mention{
+			ID: newID(), Agent: name, Room: room, RoomID: roomID, ProjectID: projectID,
+			SourceKind: sourceKind, SourceID: sourceID, Author: author, CreatedAt: now,
+		}
+		if err := db.Table(Mention{}).Insert(ctx, m); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func mentionNames(body, author string) []string {
+	names := ExtractMentions(body)
+	kept := names[:0]
+	for _, name := range names {
+		if name != author && name != ActorOwner {
+			kept = append(kept, name)
+		}
+	}
+	return kept
+}
+
+// syncMentions makes an editable source's mention rows match its current
+// body. Unchanged mentions retain their attempts and answer state; removed
+// names disappear and newly added names receive a fresh row.
+func (s *Service) syncMentions(ctx context.Context, db gowild_data.Database, body, room, roomID, projectID, sourceKind, sourceID, author string, now time.Time) error {
+	names := mentionNames(body, author)
+	wanted := make(map[string]bool, len(names))
+	for _, name := range names {
+		wanted[name] = true
+	}
+	existing, err := gowild_dbx.All[Mention](ctx, db, gowild_data.QueryOpts{
+		Where: map[string]any{"source_kind": sourceKind, "source_id": sourceID},
+	})
+	if err != nil {
+		return err
+	}
+	kept := make(map[string]bool, len(existing))
+	for _, m := range existing {
+		if !wanted[m.Agent] || kept[m.Agent] {
+			if err := db.Table(Mention{}).Delete(ctx, m.ID); err != nil {
+				return err
+			}
+			continue
+		}
+		kept[m.Agent] = true
+	}
+	for _, name := range names {
+		if kept[name] {
 			continue
 		}
 		m := &Mention{
@@ -436,6 +503,7 @@ func (s *Service) recordMentions(ctx context.Context, db gowild_data.Database, b
 		if err := db.Table(Mention{}).Insert(ctx, m); err != nil {
 			return err
 		}
+		kept[name] = true
 	}
 	return nil
 }

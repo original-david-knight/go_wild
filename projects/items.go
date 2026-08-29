@@ -229,7 +229,7 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	it, _, err := s.itemByKey(ctx, db, key)
+	it, p, err := s.itemByKey(ctx, db, key)
 	if err != nil {
 		return nil, err
 	}
@@ -278,6 +278,11 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 	}
 	if assignChanged {
 		if err := s.recordAssign(ctx, db, it, ActorOwner, assignTo, it.UpdatedAt); err != nil {
+			return nil, err
+		}
+	}
+	if patch.Description != nil {
+		if err := s.syncMentions(ctx, db, it.Description, RoomItem, it.ID, p.ID, "item", it.ID, ActorOwner, it.UpdatedAt); err != nil {
 			return nil, err
 		}
 	}
@@ -366,6 +371,13 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		if isOwner {
 			return nil, forbiddenf("the owner does not claim work")
 		}
+		held, err := s.liveLeaseForAgent(ctx, db, actor, now)
+		if err != nil {
+			return nil, err
+		}
+		if held != nil && held.ID != it.ID {
+			return nil, invalidf("%s already holds live work", actor)
+		}
 		switch from {
 		case StatusOpen:
 			if it.Assignee != "" && it.Assignee != actor {
@@ -376,7 +388,7 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			lease()
 			holdBy = actor
 		case StatusInProgress:
-			if it.Assignee != actor && !expired {
+			if leaseLive(it, now) {
 				return nil, invalidf("held by %s until %s", it.Assignee, it.LeaseExpiresAt.Format(time.RFC3339))
 			}
 			if it.Assignee != actor && it.Assignee != "" {
@@ -390,7 +402,7 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			if actor == it.Implementer {
 				return nil, forbiddenf("%s implemented this and cannot review it", actor)
 			}
-			if it.Reviewer != "" && it.Reviewer != actor && !expired {
+			if leaseLive(it, now) {
 				return nil, invalidf("under review by %s", it.Reviewer)
 			}
 			to = StatusInReview
@@ -400,6 +412,9 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		case StatusApproved:
 			if actor != it.Implementer {
 				return nil, forbiddenf("only the implementer %s finishes an approved item", it.Implementer)
+			}
+			if leaseLive(it, now) {
+				return nil, invalidf("held by %s until %s", actor, it.LeaseExpiresAt.Format(time.RFC3339))
 			}
 			to = StatusApproved
 			lease()

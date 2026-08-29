@@ -136,6 +136,13 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 		}
 		return p
 	}
+	held, err := s.liveLeaseForAgent(ctx, db, agent, now)
+	if err != nil {
+		return nil, err
+	}
+	if held != nil {
+		return nil, nil
+	}
 	var out []candidate
 
 	// 0. Mentions.
@@ -164,7 +171,7 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 	SortItems(approved)
 	for _, it := range approved {
 		p := workable(it.ProjectID)
-		if p == nil {
+		if p == nil || leaseLive(it, now) {
 			continue
 		}
 		kind := JobMerge
@@ -185,7 +192,7 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 		if p == nil || it.Implementer == agent {
 			continue
 		}
-		if it.Reviewer != "" && it.Reviewer != agent && !LeaseExpired(it, now) {
+		if it.Reviewer != "" && !LeaseExpired(it, now) {
 			continue
 		}
 		out = append(out, candidate{kind: JobReview, item: it, project: p})
@@ -199,7 +206,7 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 	}
 	SortItems(inProgress)
 	for _, it := range inProgress {
-		if p := workable(it.ProjectID); p != nil && it.Assignee == agent {
+		if p := workable(it.ProjectID); p != nil && it.Assignee == agent && !leaseLive(it, now) {
 			out = append(out, candidate{kind: JobImplement, item: it, project: p})
 		}
 	}
@@ -221,6 +228,41 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 		}
 	}
 	return out, nil
+}
+
+func leaseLive(it *Item, now time.Time) bool {
+	return !it.LeaseExpiresAt.IsZero() && !LeaseExpired(it, now)
+}
+
+func holdsLiveLease(it *Item, agent string, now time.Time) bool {
+	if !leaseLive(it, now) {
+		return false
+	}
+	switch it.Status {
+	case StatusInProgress:
+		return it.Assignee == agent
+	case StatusInReview:
+		return it.Reviewer == agent
+	case StatusApproved:
+		return it.Implementer == agent
+	default:
+		return false
+	}
+}
+
+func (s *Service) liveLeaseForAgent(ctx context.Context, db gowild_data.Database, agent string, now time.Time) (*Item, error) {
+	leased, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{
+		WhereIn: map[string][]any{"status": {StatusInProgress, StatusInReview, StatusApproved}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, it := range leased {
+		if holdsLiveLease(it, agent, now) {
+			return it, nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *Service) buildJob(ctx context.Context, db gowild_data.Database, c candidate) (*Job, error) {
