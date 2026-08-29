@@ -1167,3 +1167,281 @@ func TestReopenRestoresAWorker(t *testing.T) {
 		t.Fatalf("claude not offered its released item: %+v %v", job, err)
 	}
 }
+
+// ------------------------------------------------------------------- wait
+
+type waitResult struct {
+	ready bool
+	err   error
+}
+
+// wait runs Wait in the background; the result lands on the channel. The
+// fixture's clock must not tick while the wait is live.
+func (f *fixture) wait(ctx context.Context, agent string, timeout time.Duration) <-chan waitResult {
+	ch := make(chan waitResult, 1)
+	go func() {
+		ready, err := f.s.Wait(ctx, agent, timeout)
+		ch <- waitResult{ready: ready, err: err}
+	}()
+	return ch
+}
+
+func (f *fixture) settle(ch <-chan waitResult) waitResult {
+	f.t.Helper()
+	select {
+	case r := <-ch:
+		return r
+	case <-time.After(5 * time.Second):
+		f.t.Fatal("Wait did not return")
+		return waitResult{}
+	}
+}
+
+// parked gives a background Wait time to reach its park before the write
+// that should wake it. The assertions hold either way; the pause is what
+// makes the test exercise the park rather than the first check.
+const parked = 20 * time.Millisecond
+
+func TestWakeClosesTheGeneration(t *testing.T) {
+	f := newFixture(t)
+	before := f.s.generation()
+	select {
+	case <-before:
+		t.Fatal("generation closed before any wake")
+	default:
+	}
+	f.s.wake()
+	select {
+	case <-before:
+	default:
+		t.Fatal("wake left the generation open")
+	}
+	after := f.s.generation()
+	if after == before {
+		t.Fatal("wake did not replace the generation")
+	}
+	select {
+	case <-after:
+		t.Fatal("new generation already closed")
+	default:
+	}
+}
+
+func TestWaitReturnsAtOnceWhenAJobExists(t *testing.T) {
+	f := newFixture(t)
+	f.workers()
+	f.project("EA")
+	it := f.item("EA", "ready work")
+	ready, err := f.s.Wait(f.ctx, "claude", 10*time.Millisecond)
+	if err != nil || !ready {
+		t.Fatalf("Wait with work: %v %v", ready, err)
+	}
+	// Nothing was claimed and no check-in was recorded.
+	got, _, err := f.s.GetItem(f.ctx, "EA-1")
+	if err != nil || got.Status != StatusOpen || got.Revision != it.Revision {
+		t.Fatalf("Wait touched the item: %v %+v", err, got)
+	}
+	if a, _ := f.s.GetAgent(f.ctx, "claude"); !a.LastSeenAt.IsZero() {
+		t.Fatal("Wait recorded a check-in")
+	}
+	// A wait for the other worker, whose queue is empty, times out.
+	ready, err = f.s.Wait(f.ctx, "codex", 10*time.Millisecond)
+	if err != nil || ready {
+		t.Fatalf("Wait without work: %v %v", ready, err)
+	}
+}
+
+func TestWaitWakesOnCreateItem(t *testing.T) {
+	f := newFixture(t)
+	f.workers()
+	f.project("EA")
+	ch := f.wait(f.ctx, "claude", 2*time.Second)
+	time.Sleep(parked)
+	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "new work"}); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.settle(ch); r.err != nil || !r.ready {
+		t.Fatalf("woken by CreateItem: %+v", r)
+	}
+}
+
+func TestWaitWakesOnChatMention(t *testing.T) {
+	f := newFixture(t)
+	f.workers()
+	f.project("EA")
+	ch := f.wait(f.ctx, "codex", 2*time.Second)
+	time.Sleep(parked)
+	if _, err := f.s.PostChat(f.ctx, "EA", ActorOwner, "@codex is the cursor kept in the poller?"); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.settle(ch); r.err != nil || !r.ready {
+		t.Fatalf("woken by a chat mention: %+v", r)
+	}
+	// The general room counts too.
+	if _, err := f.s.PostChat(f.ctx, "EA", "codex", "yes"); err != nil {
+		t.Fatal(err)
+	}
+	ch = f.wait(f.ctx, "codex", 2*time.Second)
+	time.Sleep(parked)
+	if _, err := f.s.PostChat(f.ctx, "", ActorOwner, "@codex ping"); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.settle(ch); r.err != nil || !r.ready {
+		t.Fatalf("woken by a general-room mention: %+v", r)
+	}
+}
+
+func TestWaitWakesOnSubmitForTheReviewer(t *testing.T) {
+	f := newFixture(t)
+	f.workers()
+	f.project("EA")
+	f.item("EA", "Fix the poller")
+	f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim})
+	ch := f.wait(f.ctx, "codex", 2*time.Second)
+	time.Sleep(parked)
+	if _, err := f.s.Transition(f.ctx, "EA-1", TransitionInput{Actor: "claude", Action: ActionSubmit, Branch: "pm/ea-1", Body: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	r := f.settle(ch)
+	if r.err != nil || !r.ready {
+		t.Fatalf("woken by submit: %+v", r)
+	}
+	if job, _ := f.s.NextFor(f.ctx, "codex"); job == nil || job.Kind != JobReview {
+		t.Fatalf("codex's job after the wake: %+v", job)
+	}
+}
+
+func TestWaitWakesOnReassignment(t *testing.T) {
+	f := newFixture(t)
+	f.workers()
+	f.project("EA")
+	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "for codex", Assignee: "codex"}); err != nil {
+		t.Fatal(err)
+	}
+	f.tick(time.Second)
+	ch := f.wait(f.ctx, "claude", 2*time.Second)
+	time.Sleep(parked)
+	claude := "claude"
+	if _, err := f.s.UpdateItem(f.ctx, "EA-1", ItemPatch{Assignee: &claude}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.settle(ch); r.err != nil || !r.ready {
+		t.Fatalf("woken by reassignment: %+v", r)
+	}
+}
+
+// A wake for someone else's work re-checks and parks again; the wait then
+// times out with false. A notice wakes nobody.
+func TestWaitTimesOutOnAnotherWorkersWork(t *testing.T) {
+	f := newFixture(t)
+	f.workers()
+	f.project("EA")
+	ch := f.wait(f.ctx, "codex", 150*time.Millisecond)
+	time.Sleep(parked)
+	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "for claude"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.PostNotice(f.ctx, "EA", "claude", "claude started EA-1 for @codex"); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.settle(ch); r.err != nil || r.ready {
+		t.Fatalf("codex woken into claude's work: %+v", r)
+	}
+	if job, _ := f.s.NextFor(f.ctx, "claude"); job == nil {
+		t.Fatal("claude's work is missing")
+	}
+}
+
+func TestWaitIsNeverReadyForADisabledWorker(t *testing.T) {
+	f := newFixture(t)
+	f.workers()
+	f.project("EA")
+	f.item("EA", "work")
+	if _, err := f.s.SetAgentEnabled(f.ctx, "claude", false); err != nil {
+		t.Fatal(err)
+	}
+	ready, err := f.s.Wait(f.ctx, "claude", 30*time.Millisecond)
+	if err != nil || ready {
+		t.Fatalf("disabled worker: %v %v", ready, err)
+	}
+	// Un-pausing wakes the wait, and now the work counts.
+	ch := f.wait(f.ctx, "claude", 2*time.Second)
+	time.Sleep(parked)
+	if _, err := f.s.SetAgentEnabled(f.ctx, "claude", true); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.settle(ch); r.err != nil || !r.ready {
+		t.Fatalf("woken by enable: %+v", r)
+	}
+}
+
+func TestWaitWakesWhenAProjectBecomesWorkable(t *testing.T) {
+	f := newFixture(t)
+	f.workers()
+	// No repository path: the item is filed but not on the queue.
+	if _, err := f.s.CreateProject(f.ctx, ProjectInput{Key: "EA", Name: "EA project"}); err != nil {
+		t.Fatal(err)
+	}
+	f.item("EA", "waiting for a repo")
+	if ready, err := f.s.Wait(f.ctx, "claude", 30*time.Millisecond); err != nil || ready {
+		t.Fatalf("project without a repo_path: %v %v", ready, err)
+	}
+	ch := f.wait(f.ctx, "claude", 2*time.Second)
+	time.Sleep(parked)
+	repo := "/tmp/EA"
+	if _, err := f.s.UpdateProject(f.ctx, "EA", ProjectPatch{RepoPath: &repo}); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.settle(ch); r.err != nil || !r.ready {
+		t.Fatalf("woken by repo_path: %+v", r)
+	}
+	// Archived: off the queue again; un-archiving wakes the wait.
+	archived, active := ProjectArchived, ProjectActive
+	if _, err := f.s.UpdateProject(f.ctx, "EA", ProjectPatch{Status: &archived}); err != nil {
+		t.Fatal(err)
+	}
+	if ready, err := f.s.Wait(f.ctx, "claude", 30*time.Millisecond); err != nil || ready {
+		t.Fatalf("archived project: %v %v", ready, err)
+	}
+	ch = f.wait(f.ctx, "claude", 2*time.Second)
+	time.Sleep(parked)
+	if _, err := f.s.UpdateProject(f.ctx, "EA", ProjectPatch{Status: &active}); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.settle(ch); r.err != nil || !r.ready {
+		t.Fatalf("woken by un-archive: %+v", r)
+	}
+	// An edit that changes neither wakes nobody: the other worker's wait
+	// times out as before.
+	name := "renamed"
+	if _, err := f.s.UpdateProject(f.ctx, "EA", ProjectPatch{Name: &name}); err != nil {
+		t.Fatal(err)
+	}
+	if ready, err := f.s.Wait(f.ctx, "codex", 30*time.Millisecond); err != nil || ready {
+		t.Fatalf("other worker after a rename: %v %v", ready, err)
+	}
+}
+
+func TestWaitStopsWhenTheContextEnds(t *testing.T) {
+	f := newFixture(t)
+	f.workers()
+	f.project("EA")
+	ctx, cancel := context.WithCancel(f.ctx)
+	ch := f.wait(ctx, "claude", 2*time.Second)
+	time.Sleep(parked)
+	cancel()
+	if r := f.settle(ch); !errors.Is(r.err, context.Canceled) || r.ready {
+		t.Fatalf("cancelled wait: %+v", r)
+	}
+}
+
+func TestWaitForAnUnknownWorkerIsNotFound(t *testing.T) {
+	f := newFixture(t)
+	f.workers()
+	if _, err := f.s.Wait(f.ctx, "gemini", 10*time.Millisecond); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown worker: %v", err)
+	}
+	if _, err := f.s.GetAgent(f.ctx, "gemini"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("Wait created a row")
+	}
+}

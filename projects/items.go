@@ -139,6 +139,7 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 	if err := s.recordMentions(ctx, db, it.Description, RoomItem, it.ID, p.ID, "item", it.ID, in.CreatedBy, now); err != nil {
 		return nil, err
 	}
+	s.wake()
 	return it, nil
 }
 
@@ -334,6 +335,11 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 			return nil, err
 		}
 	}
+	// A new assignee has open work; a new description may name someone.
+	// The other fields move no work.
+	if assignChanged || patch.Description != nil {
+		s.wake()
+	}
 	return it, nil
 }
 
@@ -369,6 +375,10 @@ func (s *Service) Transition(ctx context.Context, key string, in TransitionInput
 	if _, err := s.applyTransition(ctx, db, it, p, in); err != nil {
 		return nil, err
 	}
+	// Every action can put work in front of someone: submit a review,
+	// approve a merge, request_changes and reopen an implement, release
+	// and block a free worker.
+	s.wake()
 	return it, nil
 }
 
@@ -724,5 +734,10 @@ func (s *Service) CommentOnItem(ctx context.Context, key, author, body string) (
 	if err != nil {
 		return nil, err
 	}
-	return s.addComment(ctx, db, TargetItem, it.ID, p.ID, author, body)
+	c, err := s.addComment(ctx, db, TargetItem, it.ID, p.ID, author, body)
+	if err != nil {
+		return nil, err
+	}
+	s.wake()
+	return c, nil
 }

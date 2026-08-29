@@ -119,6 +119,7 @@ func (s *Service) CreatePost(ctx context.Context, projectKey string, in PostInpu
 	if err := s.recordMentions(ctx, db, in.Body, RoomPost, post.ID, p.ID, "post", post.ID, in.Author, now); err != nil {
 		return nil, err
 	}
+	s.wake()
 	return post, nil
 }
 
@@ -240,6 +241,7 @@ func (s *Service) UpdatePost(ctx context.Context, id, actor string, patch PostPa
 		if err := s.syncMentions(ctx, db, post.Body, RoomPost, post.ID, p.ID, "post", post.ID, actor, post.UpdatedAt); err != nil {
 			return nil, err
 		}
+		s.wake()
 	}
 	return post, nil
 }
@@ -274,6 +276,7 @@ func (s *Service) ReplyToPost(ctx context.Context, postID, author, body string) 
 	if err := db.Table(Post{}).Update(ctx, post); err != nil {
 		return nil, err
 	}
+	s.wake()
 	return c, nil
 }
 
@@ -353,6 +356,8 @@ func (s *Service) postChat(ctx context.Context, projectKey, author, body string,
 			return nil, err
 		}
 	}
+	// A notice returned above: it names no one, so it wakes no one.
+	s.wake()
 	return m, nil
 }
 

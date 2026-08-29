@@ -118,6 +118,54 @@ func (s *Service) NextFor(ctx context.Context, agent string) (*Job, error) {
 	return s.buildJob(ctx, db, candidates[0])
 }
 
+// Wait parks until the agent's queue holds a job, ctx ends or timeout
+// passes, and reports whether there is one: true means "check in now". It
+// claims nothing and records no check-in. A disabled agent is never ready,
+// whatever its queue holds; a name with no row is ErrNotFound. Every wake
+// re-runs the check, so a wake for another worker's work parks again. A
+// timeout of zero or less checks once. ctx ending is (false, ctx.Err()).
+func (s *Service) Wait(ctx context.Context, agent string, timeout time.Duration) (bool, error) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		// The generation is read before the check so a wake between the
+		// check and the park closes the channel this turn parks on.
+		gen := s.generation()
+		ready, err := s.ready(ctx, agent)
+		if err != nil || ready {
+			return ready, err
+		}
+		select {
+		case <-gen:
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-deadline.C:
+			return false, nil
+		}
+	}
+}
+
+// ready is Wait's check: the agent exists, is enabled and has a job. It
+// takes no mutex; the writes it races are the ones that wake it.
+func (s *Service) ready(ctx context.Context, agent string) (bool, error) {
+	db, err := s.database()
+	if err != nil {
+		return false, err
+	}
+	a, err := s.agentByName(ctx, db, agent)
+	if err != nil {
+		return false, err
+	}
+	if !a.Enabled {
+		return false, nil
+	}
+	job, err := s.NextFor(ctx, agent)
+	if err != nil {
+		return false, err
+	}
+	return job != nil, nil
+}
+
 // candidates is the queue in order. Only active projects count for item
 // work, and only ones with a repository path; mentions count in any active
 // project and in the general room.

@@ -43,6 +43,10 @@ type Service struct {
 	now   func() time.Time
 	lease time.Duration
 	mu    sync.Mutex
+	// wakeMu guards gen. gen is closed and replaced on every wake, so a
+	// parked Wait holds the channel it read and returns when it closes.
+	wakeMu sync.Mutex
+	gen    chan struct{}
 }
 
 // Option customises a Service.
@@ -60,7 +64,7 @@ func WithLease(d time.Duration) Option {
 
 // NewService builds a tracker over db.
 func NewService(db DBFunc, opts ...Option) *Service {
-	s := &Service{db: db, now: time.Now, lease: DefaultLease}
+	s := &Service{db: db, now: time.Now, lease: DefaultLease, gen: make(chan struct{})}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -69,6 +73,25 @@ func NewService(db DBFunc, opts ...Option) *Service {
 
 // Now is the service's clock, UTC.
 func (s *Service) Now() time.Time { return s.now().UTC() }
+
+// wake tells every parked Wait to re-evaluate its queue. Every write that
+// can create work calls it once the write is in: an item created,
+// reassigned or transitioned, a mention recorded or synchronized, an agent
+// enabled, a project un-archived or given its repository path. It touches
+// no database and takes only wakeMu, so a caller may hold s.mu.
+func (s *Service) wake() {
+	s.wakeMu.Lock()
+	close(s.gen)
+	s.gen = make(chan struct{})
+	s.wakeMu.Unlock()
+}
+
+// generation is the channel the next wake closes.
+func (s *Service) generation() <-chan struct{} {
+	s.wakeMu.Lock()
+	defer s.wakeMu.Unlock()
+	return s.gen
+}
 
 func (s *Service) database() (gowild_data.Database, error) {
 	if s.db == nil {
@@ -221,6 +244,7 @@ func (s *Service) UpdateProject(ctx context.Context, key string, patch ProjectPa
 	if err != nil {
 		return nil, err
 	}
+	wasActive, hadRepo := p.Status == ProjectActive, p.RepoPath != ""
 	if patch.Name != nil {
 		if strings.TrimSpace(*patch.Name) == "" {
 			return nil, validationf("project name is required")
@@ -257,6 +281,11 @@ func (s *Service) UpdateProject(ctx context.Context, key string, patch ProjectPa
 	p.UpdatedAt = s.Now()
 	if err := db.Table(Project{}).Update(ctx, p); err != nil {
 		return nil, err
+	}
+	// Un-archiving puts the project's mentions on the queue, and a first
+	// repository path puts its items there: the parked waits re-check.
+	if p.Status == ProjectActive && (!wasActive || (p.RepoPath != "" && !hadRepo)) {
+		s.wake()
 	}
 	return p, nil
 }
@@ -431,6 +460,7 @@ func (s *Service) UpdateAgent(ctx context.Context, name string, patch AgentPatch
 	if err != nil {
 		return nil, err
 	}
+	wasEnabled := a.Enabled
 	if patch.Enabled != nil {
 		a.Enabled = *patch.Enabled
 	}
@@ -469,27 +499,32 @@ func (s *Service) UpdateAgent(ctx context.Context, name string, patch AgentPatch
 		if err := db.Table(Agent{}).Update(ctx, a); err != nil {
 			return nil, err
 		}
-		return a, nil
-	}
-	err = db.RunInTransaction(ctx, func(tx gowild_data.Database) error {
-		rows, err := gowild_dbx.All[Agent](ctx, tx, gowild_data.QueryOpts{})
-		if err != nil {
-			return err
-		}
-		for _, other := range rows {
-			if other.ID == a.ID || !other.IsDefault {
-				continue
-			}
-			other.IsDefault = false
-			if err := tx.Table(Agent{}).Update(ctx, other); err != nil {
+	} else {
+		err = db.RunInTransaction(ctx, func(tx gowild_data.Database) error {
+			rows, err := gowild_dbx.All[Agent](ctx, tx, gowild_data.QueryOpts{})
+			if err != nil {
 				return err
 			}
+			for _, other := range rows {
+				if other.ID == a.ID || !other.IsDefault {
+					continue
+				}
+				other.IsDefault = false
+				if err := tx.Table(Agent{}).Update(ctx, other); err != nil {
+					return err
+				}
+			}
+			a.IsDefault = true
+			return tx.Table(Agent{}).Update(ctx, a)
+		})
+		if err != nil {
+			return nil, err
 		}
-		a.IsDefault = true
-		return tx.Table(Agent{}).Update(ctx, a)
-	})
-	if err != nil {
-		return nil, err
+	}
+	// Un-pausing makes the worker's queue live again: its parked wait, if
+	// any, re-checks it.
+	if a.Enabled && !wasEnabled {
+		s.wake()
 	}
 	return a, nil
 }
