@@ -18,6 +18,9 @@ type ItemInput struct {
 	Description string
 	Priority    string
 	CreatedBy   string
+	// Assignee hands the item to one agent from the start; "" leaves it to
+	// whichever agent checks in first.
+	Assignee string
 }
 
 // ItemPatch is a partial edit of the descriptive fields; nil leaves a field
@@ -27,6 +30,10 @@ type ItemPatch struct {
 	Description *string
 	Type        *string
 	Priority    *string
+	// Assignee reassigns an open item: an agent name, or "" for the shared
+	// queue. Any other status refuses it — the holder of in-progress work is
+	// not the owner's to swap.
+	Assignee *string
 }
 
 // ItemFilter narrows a listing. With no Statuses, done and closed items are
@@ -74,6 +81,10 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 	if in.CreatedBy == "" {
 		in.CreatedBy = ActorOwner
 	}
+	in.Assignee = strings.TrimSpace(in.Assignee)
+	if in.Assignee != "" && !ValidAgentName(in.Assignee) {
+		return nil, validationf("assignee %q is not an agent name", in.Assignee)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, err := s.projectByKey(ctx, db, projectKey)
@@ -93,10 +104,15 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 	it := &Item{
 		ID: newID(), ProjectID: p.ID, Number: number, Type: in.Type,
 		Title: strings.TrimSpace(in.Title), Description: in.Description, Priority: in.Priority,
-		Status: StatusOpen, CreatedBy: in.CreatedBy, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Status: StatusOpen, Assignee: in.Assignee, CreatedBy: in.CreatedBy, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := db.Table(Item{}).Insert(ctx, it); err != nil {
 		return nil, err
+	}
+	if in.Assignee != "" {
+		if err := s.recordAssign(ctx, db, it, in.CreatedBy, in.Assignee, now); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.recordMentions(ctx, db, it.Description, RoomItem, it.ID, p.ID, "item", it.ID, in.CreatedBy, now); err != nil {
 		return nil, err
@@ -241,12 +257,46 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 		}
 		it.Priority = *patch.Priority
 	}
+	assignTo, assignChanged := "", false
+	if patch.Assignee != nil {
+		assignTo = strings.TrimSpace(*patch.Assignee)
+		if assignTo != "" && !ValidAgentName(assignTo) {
+			return nil, validationf("assignee %q is not an agent name", assignTo)
+		}
+		if assignTo != it.Assignee {
+			if it.Status != StatusOpen {
+				return nil, invalidf("only an open item is reassigned; this one is %s", it.Status)
+			}
+			it.Assignee = assignTo
+			assignChanged = true
+		}
+	}
 	it.Revision++
 	it.UpdatedAt = s.Now()
 	if err := db.Table(Item{}).Update(ctx, it); err != nil {
 		return nil, err
 	}
+	if assignChanged {
+		if err := s.recordAssign(ctx, db, it, ActorOwner, assignTo, it.UpdatedAt); err != nil {
+			return nil, err
+		}
+	}
 	return it, nil
+}
+
+// recordAssign puts the hand-off in the feed as a transition that moves no
+// status: "assigned to claude" or "returned to the queue".
+func (s *Service) recordAssign(ctx context.Context, db gowild_data.Database, it *Item, actor, assignee string, now time.Time) error {
+	body := "returned to the queue"
+	if assignee != "" {
+		body = "assigned to " + assignee
+	}
+	c := &Comment{
+		ID: newID(), TargetKind: TargetItem, TargetID: it.ID, Author: actor,
+		Kind: CommentKindTransition, Action: ActionAssign, FromStatus: it.Status, ToStatus: it.Status,
+		Body: body, CreatedAt: now,
+	}
+	return db.Table(Comment{}).Insert(ctx, c)
 }
 
 // LeaseExpired reports whether the item's holder is past its lease at now.

@@ -287,7 +287,22 @@ func (s *Service) roomProjectID(ctx context.Context, db gowild_data.Database, pr
 }
 
 // PostChat says something in a project's room, or the general room for "".
+// The line records the @names in it, and from an agent it answers every
+// open mention of that agent in the room: the agent spoke there.
 func (s *Service) PostChat(ctx context.Context, projectKey, author, body string) (*ChatMessage, error) {
+	return s.postChat(ctx, projectKey, author, body, false)
+}
+
+// PostNotice puts a line in a room on the author's behalf without the
+// author having spoken: the runner's pulses ("claude started EA-12 — Fix
+// the poller"). A notice names no one, whatever the body quotes, and
+// answers no one: the author's open mentions in the room stay open for the
+// next check-in.
+func (s *Service) PostNotice(ctx context.Context, projectKey, author, body string) (*ChatMessage, error) {
+	return s.postChat(ctx, projectKey, author, body, true)
+}
+
+func (s *Service) postChat(ctx context.Context, projectKey, author, body string, notice bool) (*ChatMessage, error) {
 	db, err := s.database()
 	if err != nil {
 		return nil, err
@@ -306,12 +321,15 @@ func (s *Service) PostChat(ctx context.Context, projectKey, author, body string)
 		return nil, err
 	}
 	now := s.Now()
-	m := &ChatMessage{
-		ID: newID(), ProjectID: projectID, Author: author, Body: body,
-		Mentions: joinMentions(ExtractMentions(body)), CreatedAt: now,
+	m := &ChatMessage{ID: newID(), ProjectID: projectID, Author: author, Body: body, CreatedAt: now}
+	if !notice {
+		m.Mentions = joinMentions(ExtractMentions(body))
 	}
 	if err := db.Table(ChatMessage{}).Insert(ctx, m); err != nil {
 		return nil, err
+	}
+	if notice {
+		return m, nil
 	}
 	if err := s.recordMentions(ctx, db, body, RoomChat, projectID, projectID, "chat", m.ID, author, now); err != nil {
 		return nil, err

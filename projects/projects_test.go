@@ -540,6 +540,50 @@ func TestMentionsBecomeRespondJobs(t *testing.T) {
 	}
 }
 
+// A notice is the runner speaking for an agent, not the agent speaking: it
+// records no mention, whatever the body quotes, and closes none.
+func TestNoticesNeitherNameNorAnswer(t *testing.T) {
+	f := newFixture(t)
+	f.project("EA")
+	if _, err := f.s.PostChat(f.ctx, "EA", ActorOwner, "@claude where is the cursor kept?"); err != nil {
+		t.Fatal(err)
+	}
+	f.tick(time.Second)
+	m, err := f.s.PostNotice(f.ctx, "EA", "claude", "claude started EA-1 — Ask @codex to review the poller")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Author != "claude" || m.Mentions != "" {
+		t.Fatalf("notice row: %+v", m)
+	}
+	f.tick(time.Second)
+	open, _ := f.s.UnansweredMentions(f.ctx, "claude")
+	if len(open) != 1 {
+		t.Fatalf("the notice closed the owner's question: %d open", len(open))
+	}
+	if named, _ := f.s.UnansweredMentions(f.ctx, "codex"); len(named) != 0 {
+		t.Fatalf("the notice recorded a mention nobody wrote: %+v", named[0])
+	}
+	if job, _ := f.s.NextFor(f.ctx, "codex"); job != nil && job.Kind == JobRespond {
+		t.Fatalf("codex owes a respond job for a quoted @name: %+v", job.Mention.Mention)
+	}
+	// The line is in the room like any other.
+	room, _ := f.s.ListChat(f.ctx, "EA", "", 0)
+	if len(room) != 2 || room[1].ID != m.ID {
+		t.Fatalf("room: %+v", room)
+	}
+	// Speaking still answers.
+	if _, err := f.s.PostChat(f.ctx, "EA", "claude", "in the poller"); err != nil {
+		t.Fatal(err)
+	}
+	if open, _ = f.s.UnansweredMentions(f.ctx, "claude"); len(open) != 0 {
+		t.Fatalf("still open after the answer: %+v", open[0])
+	}
+	if _, err := f.s.PostNotice(f.ctx, "EA", "claude", "  "); !errors.Is(err, ErrValidation) {
+		t.Fatalf("empty notice: %v", err)
+	}
+}
+
 func TestHelpers(t *testing.T) {
 	if got := ExtractMentions("hi @Claude and @codex, mail me@example.com, @claude again"); len(got) != 2 || got[0] != "claude" || got[1] != "codex" {
 		t.Fatalf("mentions: %v", got)
@@ -602,5 +646,111 @@ func TestRunsRecordWhatAnAgentDid(t *testing.T) {
 	}
 	if _, err := f.s.GetRun(f.ctx, "nope"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing run: %v", err)
+	}
+}
+
+func TestAssignmentIsExclusiveWhenSet(t *testing.T) {
+	f := newFixture(t)
+	f.project("EA")
+	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "x", Assignee: "Owner"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("bad assignee: %v", err)
+	}
+	it, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "for codex", Assignee: "codex"})
+	if err != nil || it.Assignee != "codex" {
+		t.Fatalf("assigned create: %v %+v", err, it)
+	}
+	f.tick(time.Second)
+	// The other agent is not offered it and cannot claim it.
+	if job, _ := f.s.NextFor(f.ctx, "claude"); job != nil {
+		t.Fatalf("claude offered codex's item: %+v", job.Item)
+	}
+	f.refuse("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim}, ErrInvalidTransition)
+	job, _ := f.s.NextFor(f.ctx, "codex")
+	if job == nil || job.Item.ID != it.ID {
+		t.Fatalf("codex not offered its item: %+v", job)
+	}
+	// Reassigning an open item records the hand-off; "" returns it to the queue.
+	claude := "claude"
+	got, err := f.s.UpdateItem(f.ctx, "EA-1", ItemPatch{Assignee: &claude}, 0)
+	if err != nil || got.Assignee != "claude" {
+		t.Fatalf("reassign: %v %+v", err, got)
+	}
+	none := ""
+	if got, err = f.s.UpdateItem(f.ctx, "EA-1", ItemPatch{Assignee: &none}, 0); err != nil || got.Assignee != "" {
+		t.Fatalf("unassign: %v %+v", err, got)
+	}
+	feed, _ := f.s.ItemComments(f.ctx, it.ID)
+	var assigns []string
+	for _, c := range feed {
+		if c.Action == ActionAssign {
+			assigns = append(assigns, c.Body)
+		}
+	}
+	if len(assigns) != 3 || assigns[0] != "assigned to codex" || assigns[1] != "assigned to claude" || assigns[2] != "returned to the queue" {
+		t.Fatalf("assign feed: %v", assigns)
+	}
+	// Once claimed, the owner cannot swap the holder.
+	f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim})
+	if _, err := f.s.UpdateItem(f.ctx, "EA-1", ItemPatch{Assignee: &none}, 0); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("reassign in progress: %v", err)
+	}
+	// An unchanged assignee is not a reassignment and passes in any status.
+	same := "claude"
+	if _, err := f.s.UpdateItem(f.ctx, "EA-1", ItemPatch{Assignee: &same}, 0); err != nil {
+		t.Fatalf("same assignee: %v", err)
+	}
+}
+
+func TestActivityMergesEverythingNewestFirst(t *testing.T) {
+	f := newFixture(t)
+	p := f.project("EA")
+	f.project("OT")
+	it := f.item("EA", "the item")
+	f.s.CommentOnItem(f.ctx, "EA-1", ActorOwner, "a comment")
+	f.tick(time.Second)
+	post, _ := f.s.CreatePost(f.ctx, "EA", PostInput{Author: "claude", Title: "a post", Body: "opening"})
+	f.tick(time.Second)
+	f.s.ReplyToPost(f.ctx, post.ID, ActorOwner, "a reply")
+	f.tick(time.Second)
+	f.s.PostChat(f.ctx, "EA", "codex", "a chat line")
+	f.tick(time.Second)
+	f.s.PostChat(f.ctx, "", ActorOwner, "general line")
+	f.tick(time.Second)
+	f.s.PostChat(f.ctx, "OT", ActorOwner, "other project line")
+	f.tick(time.Second)
+	run, _ := f.s.StartRun(f.ctx, RunInput{Agent: "claude", Kind: JobImplement, ItemID: it.ID, ProjectID: p.ID})
+	f.tick(time.Second)
+	f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim})
+
+	entries, err := f.s.Activity(f.ctx, ActivityFilter{ProjectID: p.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, e := range entries {
+		kinds = append(kinds, e.Kind)
+		if e.ProjectID != p.ID {
+			t.Fatalf("foreign entry in project feed: %+v", e)
+		}
+	}
+	want := []string{ActivityTransition, ActivityRun, ActivityChat, ActivityReply, ActivityPost, ActivityComment}
+	if len(kinds) != len(want) {
+		t.Fatalf("kinds %v, want %v", kinds, want)
+	}
+	for i := range want {
+		if kinds[i] != want[i] {
+			t.Fatalf("kinds %v, want %v", kinds, want)
+		}
+	}
+	if entries[0].Action != ActionClaim || entries[0].Title != "the item" || entries[1].RunID != run.ID || entries[1].Outcome != "" {
+		t.Fatalf("head entries: %+v %+v", entries[0], entries[1])
+	}
+	all, _ := f.s.Activity(f.ctx, ActivityFilter{})
+	if len(all) != 8 {
+		t.Fatalf("global feed %d, want 8", len(all))
+	}
+	two, _ := f.s.Activity(f.ctx, ActivityFilter{Limit: 2})
+	if len(two) != 2 {
+		t.Fatalf("limit: %d", len(two))
 	}
 }

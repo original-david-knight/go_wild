@@ -84,6 +84,9 @@ const (
 	ActionComplete       = "complete"
 	ActionReopen         = "reopen"
 	ActionClose          = "close"
+	// ActionAssign is the owner handing an open item to one agent, or back
+	// to the shared queue; the status does not move.
+	ActionAssign = "assign"
 )
 
 // Review verdicts.
