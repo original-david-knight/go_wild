@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -55,6 +56,8 @@ type Client struct {
 	RequireWebSearchUse bool
 	Timeout             time.Duration // per-call timeout (0 = no limit, uses parent context only)
 	Label               string        // optional label for log lines (e.g. "planner", "synthesizer")
+	Dir                 string        // optional working directory for the codex process ("" = inherit)
+	Env                 []string      // optional extra KEY=VALUE pairs appended to the inherited environment
 }
 
 // Generate runs `codex exec` with the given prompt and optional system prompt,
@@ -99,11 +102,16 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 		sandboxMode = "read-only"
 	}
 
+	// codex 0.149 dropped `--full-auto`. A non-interactive run says how
+	// approvals are handled explicitly: the sandbox mode through `-s`, and
+	// approval prompts off, since nobody is there to answer them. The
+	// bypass flag is only shorthand for the same pair and stays off the host
+	// path (see TestGenerate_SandboxModeFlag).
 	args := []string{
 		"exec",
 		"--json",
-		"--full-auto",
 		"-s", sandboxMode,
+		"-c", "approval_policy=\"never\"",
 		"--skip-git-repo-check",
 		"--ephemeral",
 	}
@@ -122,6 +130,12 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 	started := time.Now()
 
 	cmd := exec.CommandContext(ctx, bin, args...)
+	if c.Dir != "" {
+		cmd.Dir = c.Dir
+	}
+	if len(c.Env) > 0 {
+		cmd.Env = append(os.Environ(), c.Env...)
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", nil, fmt.Errorf("%s: failed to create stdout pipe: %w", label, err)
@@ -342,12 +356,12 @@ func parseCodexStreamLine(line string) (string, bool) {
 }
 
 type codexStreamMessage struct {
-	Type     string              `json:"type"`
-	ThreadID string              `json:"thread_id,omitempty"`
-	Message  string              `json:"message,omitempty"`
-	Item     *codexItem          `json:"item,omitempty"`
-	Usage    *codexUsage         `json:"usage,omitempty"`
-	Error    *codexErrorDetail   `json:"error,omitempty"`
+	Type     string            `json:"type"`
+	ThreadID string            `json:"thread_id,omitempty"`
+	Message  string            `json:"message,omitempty"`
+	Item     *codexItem        `json:"item,omitempty"`
+	Usage    *codexUsage       `json:"usage,omitempty"`
+	Error    *codexErrorDetail `json:"error,omitempty"`
 }
 
 type codexItem struct {

@@ -27,6 +27,7 @@ use (
 	./oauth2app
 	./objectives
 	./pollers
+	./projects
 	./polymarket
 	./tools
 	./ytmusic
@@ -59,6 +60,7 @@ replace (
 	github.com/original-david-knight/go_wild/oauth2app v0.0.0 => ./oauth2app
 	github.com/original-david-knight/go_wild/objectives v0.0.0 => ./objectives
 	github.com/original-david-knight/go_wild/pollers v0.0.0 => ./pollers
+	github.com/original-david-knight/go_wild/projects v0.0.0 => ./projects
 	github.com/original-david-knight/go_wild/polymarket v0.0.0 => ./polymarket
 	github.com/original-david-knight/go_wild/tools v0.0.0 => ./tools
 	github.com/original-david-knight/go_wild/ytmusic v0.0.0 => ./ytmusic

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -22,6 +23,8 @@ type Client struct {
 	OutputStylePath string        // optional path to a .md output style file (strips default SE prompt)
 	Timeout         time.Duration // per-call timeout (0 = no limit, uses parent context only)
 	Label           string        // optional label for log lines (e.g. "planner", "synthesizer")
+	Dir             string        // optional working directory for the claude process ("" = inherit)
+	Env             []string      // optional extra KEY=VALUE pairs appended to the inherited environment
 }
 
 // Generate runs `claude -p` with the given prompt and optional system prompt,
@@ -77,6 +80,12 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 	started := time.Now()
 
 	cmd := exec.CommandContext(ctx, bin, args...)
+	if c.Dir != "" {
+		cmd.Dir = c.Dir
+	}
+	if len(c.Env) > 0 {
+		cmd.Env = append(os.Environ(), c.Env...)
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", fmt.Errorf("%s: failed to create stdout pipe: %w", label, err)

@@ -1,0 +1,316 @@
+package gowild_projects
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	gowild_data "github.com/original-david-knight/go_wild/data"
+	gowild_dbx "github.com/original-david-knight/go_wild/data/dbx"
+)
+
+// RecentChatForJob is how much of a room a job prompt carries.
+const RecentChatForJob = 30
+
+// Job is what a check-in hands an agent: the kind of work, the item or the
+// mention it concerns, and the project context every job carries.
+type Job struct {
+	Kind    string   `json:"kind"`
+	Project *Project `json:"project"`
+	// Item and Comments are set for item jobs; nil for respond.
+	Item     *Item      `json:"item"`
+	Comments []*Comment `json:"comments"`
+	// Pinned and Chat are the project's standing context and its room's
+	// recent messages. For the general room Project is nil and Chat is the
+	// general room.
+	Pinned []*Post        `json:"pinned"`
+	Chat   []*ChatMessage `json:"chat"`
+	// Mention is set for respond jobs.
+	Mention *MentionContext `json:"mention"`
+}
+
+// MentionContext is a respond job's target: the mention and the message
+// that made it, with the thread it sits in.
+type MentionContext struct {
+	Mention *Mention `json:"mention"`
+	// Exactly one of these is set, by the source kind.
+	ChatMessage *ChatMessage `json:"chat_message"`
+	Comment     *Comment     `json:"comment"`
+	Post        *Post        `json:"post"`
+	// Thread is the post's replies or the item's feed when the room is a
+	// post or an item; nil for chat (the Job's Chat field is the room).
+	Thread []*Comment `json:"thread"`
+	// Item is set when the room is an item.
+	Item *Item `json:"item"`
+	// ThreadPost is the post when the room is a post (Post above is set
+	// only when the post body itself made the mention).
+	ThreadPost *Post `json:"thread_post"`
+}
+
+type candidate struct {
+	kind    string
+	item    *Item
+	project *Project
+	mention *Mention
+}
+
+// CheckIn records the agent as seen and returns its next job, or nil when
+// there is nothing. With claim the item is claimed (or the mention's attempt
+// counted) before it is returned, atomically under the service's mutex.
+func (s *Service) CheckIn(ctx context.Context, agent string, claim bool) (*Job, error) {
+	db, err := s.database()
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, err := s.ensureAgent(ctx, db, agent)
+	if err != nil {
+		return nil, err
+	}
+	now := s.Now()
+	a.LastSeenAt = now
+	if err := db.Table(Agent{}).Update(ctx, a); err != nil {
+		return nil, err
+	}
+	if !a.Enabled {
+		return nil, nil
+	}
+	candidates, err := s.candidates(ctx, db, agent, now)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range candidates {
+		if claim {
+			if c.mention != nil {
+				c.mention.Attempts++
+				if err := db.Table(Mention{}).Update(ctx, c.mention); err != nil {
+					return nil, err
+				}
+			} else {
+				if _, err := s.applyTransition(ctx, db, c.item, c.project, TransitionInput{Actor: agent, Action: ActionClaim}); err != nil {
+					// Lost a race or the rules moved under us: skip it and
+					// try the next candidate rather than fail the check-in.
+					continue
+				}
+			}
+		}
+		return s.buildJob(ctx, db, c)
+	}
+	return nil, nil
+}
+
+// NextFor previews the agent's next job without claiming or recording the
+// check-in.
+func (s *Service) NextFor(ctx context.Context, agent string) (*Job, error) {
+	db, err := s.database()
+	if err != nil {
+		return nil, err
+	}
+	candidates, err := s.candidates(ctx, db, agent, s.Now())
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	return s.buildJob(ctx, db, candidates[0])
+}
+
+// candidates is the queue in order. Only active projects count for item
+// work, and only ones with a repository path; mentions count in any active
+// project and in the general room.
+func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent string, now time.Time) ([]candidate, error) {
+	projects, err := gowild_dbx.All[Project](ctx, db, gowild_data.QueryOpts{})
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]*Project, len(projects))
+	for _, p := range projects {
+		byID[p.ID] = p
+	}
+	workable := func(projectID string) *Project {
+		p := byID[projectID]
+		if p == nil || p.Status != ProjectActive || p.RepoPath == "" {
+			return nil
+		}
+		return p
+	}
+	var out []candidate
+
+	// 0. Mentions.
+	mentions, err := s.unansweredMentions(ctx, db, agent)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range mentions {
+		var p *Project
+		if m.ProjectID != "" {
+			p = byID[m.ProjectID]
+			if p == nil || p.Status != ProjectActive {
+				continue
+			}
+		}
+		out = append(out, candidate{kind: JobRespond, mention: m, project: p})
+	}
+
+	// 1. Approved work of mine to finish.
+	approved, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{
+		Where: map[string]any{"status": StatusApproved, "implementer": agent},
+	})
+	if err != nil {
+		return nil, err
+	}
+	SortItems(approved)
+	for _, it := range approved {
+		p := workable(it.ProjectID)
+		if p == nil {
+			continue
+		}
+		kind := JobMerge
+		if p.MergePolicy == MergePolicyPullRequest {
+			kind = JobPullRequest
+		}
+		out = append(out, candidate{kind: kind, item: it, project: p})
+	}
+
+	// 2. Reviews of the other agent's work.
+	inReview, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{Where: map[string]any{"status": StatusInReview}})
+	if err != nil {
+		return nil, err
+	}
+	SortItems(inReview)
+	for _, it := range inReview {
+		p := workable(it.ProjectID)
+		if p == nil || it.Implementer == agent {
+			continue
+		}
+		if it.Reviewer != "" && it.Reviewer != agent && !LeaseExpired(it, now) {
+			continue
+		}
+		out = append(out, candidate{kind: JobReview, item: it, project: p})
+	}
+
+	// 3 and 4. In-progress work: mine first, then anything whose holder is
+	// past its lease.
+	inProgress, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{Where: map[string]any{"status": StatusInProgress}})
+	if err != nil {
+		return nil, err
+	}
+	SortItems(inProgress)
+	for _, it := range inProgress {
+		if p := workable(it.ProjectID); p != nil && it.Assignee == agent {
+			out = append(out, candidate{kind: JobImplement, item: it, project: p})
+		}
+	}
+	for _, it := range inProgress {
+		if p := workable(it.ProjectID); p != nil && it.Assignee != agent && LeaseExpired(it, now) {
+			out = append(out, candidate{kind: JobImplement, item: it, project: p})
+		}
+	}
+
+	// 5. Open work nobody holds.
+	open, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{Where: map[string]any{"status": StatusOpen}})
+	if err != nil {
+		return nil, err
+	}
+	SortItems(open)
+	for _, it := range open {
+		if p := workable(it.ProjectID); p != nil && (it.Assignee == "" || it.Assignee == agent) {
+			out = append(out, candidate{kind: JobImplement, item: it, project: p})
+		}
+	}
+	return out, nil
+}
+
+func (s *Service) buildJob(ctx context.Context, db gowild_data.Database, c candidate) (*Job, error) {
+	job := &Job{Kind: c.kind, Project: c.project, Pinned: []*Post{}, Chat: []*ChatMessage{}, Comments: []*Comment{}}
+	roomID := ""
+	if c.project != nil {
+		roomID = c.project.ID
+		pinned, err := s.pinnedPosts(ctx, db, c.project.ID)
+		if err != nil {
+			return nil, err
+		}
+		job.Pinned = pinned
+	}
+	chat, err := s.recentChat(ctx, db, roomID, RecentChatForJob)
+	if err != nil {
+		return nil, err
+	}
+	job.Chat = chat
+	if c.item != nil {
+		job.Item = c.item
+		comments, err := s.comments(ctx, db, TargetItem, c.item.ID)
+		if err != nil {
+			return nil, err
+		}
+		job.Comments = comments
+		return job, nil
+	}
+	if c.mention != nil {
+		mc, err := s.mentionContext(ctx, db, c.mention)
+		if err != nil {
+			return nil, err
+		}
+		job.Mention = mc
+	}
+	return job, nil
+}
+
+func (s *Service) mentionContext(ctx context.Context, db gowild_data.Database, m *Mention) (*MentionContext, error) {
+	mc := &MentionContext{Mention: m, Thread: []*Comment{}}
+	switch m.SourceKind {
+	case "chat":
+		msg, err := gowild_dbx.Get[ChatMessage](ctx, db, m.SourceID)
+		if err != nil {
+			return nil, err
+		}
+		mc.ChatMessage = msg
+	case "post":
+		post, err := gowild_dbx.Get[Post](ctx, db, m.SourceID)
+		if err != nil {
+			return nil, err
+		}
+		mc.Post = post
+	case "comment":
+		c, err := gowild_dbx.Get[Comment](ctx, db, m.SourceID)
+		if err != nil {
+			return nil, err
+		}
+		mc.Comment = c
+	case "item":
+		it, err := gowild_dbx.Get[Item](ctx, db, m.SourceID)
+		if err != nil {
+			return nil, err
+		}
+		mc.Item = it
+	default:
+		return nil, fmt.Errorf("mention %s has unknown source %q", m.ID, m.SourceKind)
+	}
+	switch m.Room {
+	case RoomPost:
+		post, err := gowild_dbx.Get[Post](ctx, db, m.RoomID)
+		if err != nil {
+			return nil, err
+		}
+		mc.ThreadPost = post
+		thread, err := s.comments(ctx, db, TargetPost, m.RoomID)
+		if err != nil {
+			return nil, err
+		}
+		mc.Thread = thread
+	case RoomItem:
+		it, err := gowild_dbx.Get[Item](ctx, db, m.RoomID)
+		if err != nil {
+			return nil, err
+		}
+		mc.Item = it
+		thread, err := s.comments(ctx, db, TargetItem, m.RoomID)
+		if err != nil {
+			return nil, err
+		}
+		mc.Thread = thread
+	}
+	return mc, nil
+}
