@@ -87,6 +87,10 @@ const (
 	// ActionAssign is the owner handing an item to another worker; the
 	// status does not move.
 	ActionAssign = "assign"
+	// ActionHold parks an open item and ActionUnhold releases it; the
+	// status does not move. The owner only.
+	ActionHold   = "hold"
+	ActionUnhold = "unhold"
 )
 
 // Worker CLIs — which command the runner spawns for an agent.
@@ -199,7 +203,16 @@ type Item struct {
 	LastVerdict   string    `json:"last_verdict"`
 	LastVerdictBy string    `json:"last_verdict_by"`
 	LastVerdictAt time.Time `json:"last_verdict_at"`
-	CreatedBy     string    `json:"created_by"`
+	// Label is a free-text tag for grouping and filtering; "" is no label.
+	Label string `json:"label"`
+	// After is the key of an item in the same project ("EA-1") this one
+	// waits on: until that item is done or closed the queue never offers
+	// this one and a claim is refused. "" is no dependency.
+	After string `json:"after"`
+	// Held parks an open item: the queue never offers it and a claim is
+	// refused until the owner lifts the hold. Only an open item is held.
+	Held      bool   `json:"held"`
+	CreatedBy string `json:"created_by"`
 	// Revision bumps on every write; the API's X-Base-Revision precondition
 	// stands on it.
 	Revision  int       `json:"revision"`

@@ -272,9 +272,20 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 	}
 	SortItems(open)
 	for _, it := range open {
-		if p := workable(it.ProjectID); p != nil {
-			out = append(out, candidate{kind: JobImplement, item: it, project: p})
+		p := workable(it.ProjectID)
+		if p == nil || it.Held {
+			continue
 		}
+		// An item waiting on another is not offered until that one is done
+		// or closed; the transition that settles it wakes the parked waits.
+		settled, err := s.afterSettled(ctx, db, it)
+		if err != nil {
+			return nil, err
+		}
+		if !settled {
+			continue
+		}
+		out = append(out, candidate{kind: JobImplement, item: it, project: p})
 	}
 	return out, nil
 }

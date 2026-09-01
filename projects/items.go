@@ -22,6 +22,14 @@ type ItemInput struct {
 	// Assignee hands the item to one worker from the start; "" stamps the
 	// default worker.
 	Assignee string
+	// Label tags the item for grouping; "" is no label.
+	Label string
+	// After names an item in the same project this one waits on; "" is no
+	// dependency.
+	After string
+	// Held files the item parked: the queue skips it until the owner
+	// lifts the hold.
+	Held bool
 }
 
 // ItemPatch is a partial edit of the descriptive fields; nil leaves a field
@@ -36,6 +44,10 @@ type ItemPatch struct {
 	// (the holder's runner died); any other status refuses it — live work is
 	// not the owner's to swap.
 	Assignee *string
+	// Label retags the item; the empty string clears it.
+	Label *string
+	// After re-points or clears the dependency; the empty string clears it.
+	After *string
 }
 
 // ItemFilter narrows a listing. With no Statuses, done and closed items are
@@ -44,6 +56,7 @@ type ItemFilter struct {
 	ProjectKey    string
 	Statuses      []string
 	Assignee      string
+	Label         string
 	IncludeClosed bool
 }
 
@@ -87,9 +100,20 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 	if in.Assignee != "" && !ValidAgentName(in.Assignee) {
 		return nil, validationf("assignee %q is not an agent name", in.Assignee)
 	}
+	label, err := cleanLabel(in.Label)
+	if err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, err := s.projectByKey(ctx, db, projectKey)
+	if err != nil {
+		return nil, err
+	}
+	// The dependency is resolved under the mutex so the item it names
+	// cannot vanish between the check and the write. Nothing references a
+	// new item yet, so creation cannot make a cycle.
+	after, err := s.resolveAfter(ctx, db, p, "", in.After)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +150,8 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 	it := &Item{
 		ID: newID(), ProjectID: p.ID, Number: number, Type: in.Type,
 		Title: strings.TrimSpace(in.Title), Description: in.Description, Priority: in.Priority,
-		Status: StatusOpen, Assignee: in.Assignee, CreatedBy: in.CreatedBy, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Status: StatusOpen, Assignee: in.Assignee, Label: label, After: after, Held: in.Held,
+		CreatedBy: in.CreatedBy, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := db.Table(Item{}).Insert(ctx, it); err != nil {
 		return nil, err
@@ -201,6 +226,9 @@ func (s *Service) ListItems(ctx context.Context, f ItemFilter) ([]*Item, error) 
 	}
 	if f.Assignee != "" {
 		opts.Where["assignee"] = f.Assignee
+	}
+	if f.Label != "" {
+		opts.Where["label"] = f.Label
 	}
 	if len(f.Statuses) > 0 {
 		vals := make([]any, 0, len(f.Statuses))
@@ -280,6 +308,32 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 		}
 		it.Priority = *patch.Priority
 	}
+	if patch.Label != nil {
+		label, err := cleanLabel(*patch.Label)
+		if err != nil {
+			return nil, err
+		}
+		it.Label = label
+	}
+	afterChanged := false
+	if patch.After != nil {
+		after, err := s.resolveAfter(ctx, db, p, it.ID, *patch.After)
+		if err != nil {
+			return nil, err
+		}
+		if after != "" {
+			// Re-pointing must not close a loop through the chain above.
+			loops, err := s.afterChainLoops(ctx, db, after, ItemKey(p, it))
+			if err != nil {
+				return nil, err
+			}
+			if loops {
+				return nil, validationf("after %s would loop back to this item", after)
+			}
+		}
+		afterChanged = it.After != after
+		it.After = after
+	}
 	now := s.Now()
 	assignTo, assignFrom, assignChanged := "", "", false
 	if patch.Assignee != nil {
@@ -335,12 +389,86 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 			return nil, err
 		}
 	}
-	// A new assignee has open work; a new description may name someone.
-	// The other fields move no work.
-	if assignChanged || patch.Description != nil {
+	// A new assignee has open work; a new description may name someone; a
+	// cleared or re-pointed dependency may free an item. The other fields
+	// move no work.
+	if assignChanged || afterChanged || patch.Description != nil {
 		s.wake()
 	}
 	return it, nil
+}
+
+// cleanLabel trims a label and refuses one that cannot sit in a table row:
+// more than 64 runes, or a line break.
+func cleanLabel(raw string) (string, error) {
+	label := strings.TrimSpace(raw)
+	if len([]rune(label)) > 64 {
+		return "", validationf("label is longer than 64 characters")
+	}
+	if strings.ContainsAny(label, "\r\n") {
+		return "", validationf("label must be one line")
+	}
+	return label, nil
+}
+
+// resolveAfter canonicalises a dependency key: "" is none; otherwise it must
+// name an existing item in the same project and not the item itself.
+func (s *Service) resolveAfter(ctx context.Context, db gowild_data.Database, p *Project, selfID, raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", nil
+	}
+	target, tp, err := s.itemByKey(ctx, db, raw)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return "", validationf("after %q names no item", strings.TrimSpace(raw))
+		}
+		return "", err
+	}
+	if tp.ID != p.ID {
+		return "", validationf("after must name an item in this project; %s is in %s", ItemKey(tp, target), tp.Key)
+	}
+	if selfID != "" && target.ID == selfID {
+		return "", validationf("an item cannot wait on itself")
+	}
+	return ItemKey(tp, target), nil
+}
+
+// afterChainLoops walks the dependency chain from startKey and reports
+// whether it reaches selfKey. Chains are short; the cap only guards a
+// corrupt store.
+func (s *Service) afterChainLoops(ctx context.Context, db gowild_data.Database, startKey, selfKey string) (bool, error) {
+	key := startKey
+	for hops := 0; key != "" && hops < 100; hops++ {
+		if key == selfKey {
+			return true, nil
+		}
+		it, _, err := s.itemByKey(ctx, db, key)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return false, nil
+			}
+			return false, err
+		}
+		key = it.After
+	}
+	return false, nil
+}
+
+// afterSettled reports whether the item's dependency is settled: no after,
+// or the item it names is done or closed either way. An after whose item is
+// gone blocks nothing.
+func (s *Service) afterSettled(ctx context.Context, db gowild_data.Database, it *Item) (bool, error) {
+	if it.After == "" {
+		return true, nil
+	}
+	target, _, err := s.itemByKey(ctx, db, it.After)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrValidation) {
+			return true, nil
+		}
+		return false, err
+	}
+	return target.Status == StatusDone || target.Status == StatusClosed, nil
 }
 
 // recordAssign puts the hand-off in the feed as a transition that moves no
@@ -441,6 +569,16 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		case StatusOpen:
 			if it.Assignee != "" && it.Assignee != actor {
 				return nil, invalidf("%s is assigned to %s", from, it.Assignee)
+			}
+			if it.Held {
+				return nil, invalidf("held by the owner")
+			}
+			settled, err := s.afterSettled(ctx, db, it)
+			if err != nil {
+				return nil, err
+			}
+			if !settled {
+				return nil, invalidf("waits on %s", it.After)
 			}
 			to = StatusInProgress
 			it.Assignee = actor
@@ -658,6 +796,32 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		it.Reviewer = ""
 		it.ClosedAt = time.Time{}
 		clearLease()
+	case ActionHold:
+		if !isOwner {
+			return nil, forbiddenf("only the owner holds an item")
+		}
+		if from != StatusOpen {
+			return nil, invalidf("cannot hold from %s", from)
+		}
+		if it.Held {
+			return nil, invalidf("already held")
+		}
+		it.Held = true
+		to = StatusOpen
+	case ActionUnhold:
+		if !isOwner {
+			return nil, forbiddenf("only the owner lifts a hold")
+		}
+		// A held item that was closed keeps its hold; reopen brings it back
+		// still parked, and the unhold happens there.
+		if from != StatusOpen {
+			return nil, invalidf("cannot unhold from %s", from)
+		}
+		if !it.Held {
+			return nil, invalidf("not held")
+		}
+		it.Held = false
+		to = StatusOpen
 	case ActionClose:
 		if !isOwner {
 			return nil, forbiddenf("only the owner closes")
