@@ -131,12 +131,16 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 	if c.ReasoningEffort != "" {
 		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=\"%s\"", c.ReasoningEffort))
 	}
-	args = append(args, fullPrompt)
+	// The prompt goes in on stdin, not argv: a job prompt carrying a full
+	// item feed can run past the OS ARG_MAX, and `codex exec -` reads the
+	// prompt from stdin.
+	args = append(args, "-")
 
 	log.Printf("[%s] starting codex CLI (profile=%s, model=%s, effort=%s, prompt_len=%d)", label, c.Profile, c.Model, c.ReasoningEffort, len(fullPrompt))
 	started := time.Now()
 
 	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Stdin = strings.NewReader(fullPrompt)
 	if c.Dir != "" {
 		cmd.Dir = c.Dir
 	}

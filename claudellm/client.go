@@ -47,7 +47,10 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 		label = "claudellm"
 	}
 
-	args := []string{"-p", prompt, "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"}
+	// The prompt goes in on stdin, not argv: a job prompt carrying a full
+	// item feed can run to megabytes, past the OS ARG_MAX, and `claude -p`
+	// with no positional prompt reads it from stdin.
+	args := []string{"-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"}
 	if c.Model != "" {
 		args = append(args, "--model", c.Model)
 	}
@@ -84,6 +87,7 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 	started := time.Now()
 
 	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Stdin = strings.NewReader(prompt)
 	if c.Dir != "" {
 		cmd.Dir = c.Dir
 	}

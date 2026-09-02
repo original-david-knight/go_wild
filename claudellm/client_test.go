@@ -159,3 +159,47 @@ func TestGenerate_EffortFlag(t *testing.T) {
 		})
 	}
 }
+
+// stageFakeClaudeCaptureStdin stages a fake claude that copies its stdin to
+// STDIN_CAPTURE_FILE and echoes a minimal result. It also records argv so a
+// test can assert the prompt is NOT on the command line.
+func stageFakeClaudeCaptureStdin(t *testing.T, stdinFile, argsFile string) {
+	t.Helper()
+	stageFakeClaude(t, `#!/bin/sh
+cat > "$STDIN_CAPTURE_FILE"
+: > "$ARGS_CAPTURE_FILE"
+for arg in "$@"; do printf '%s\n' "$arg" >> "$ARGS_CAPTURE_FILE"; done
+echo '{"type":"result","result":"ok"}'
+`)
+	t.Setenv("STDIN_CAPTURE_FILE", stdinFile)
+	t.Setenv("ARGS_CAPTURE_FILE", argsFile)
+}
+
+// TestGenerate_PromptOnStdin is the regression guard for the ARG_MAX crash:
+// a job prompt carrying a full item feed can exceed the OS argument limit, so
+// the prompt must travel on stdin, never argv. A prompt larger than a typical
+// ARG_MAX (~2MB) round-trips without a fork/exec "argument list too long".
+func TestGenerate_PromptOnStdin(t *testing.T) {
+	stdinFile := filepath.Join(t.TempDir(), "stdin.txt")
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	stageFakeClaudeCaptureStdin(t, stdinFile, argsFile)
+
+	huge := strings.Repeat("x", 3<<20) // 3 MiB, past a typical 2 MiB ARG_MAX
+	c := &Client{Label: "test", Model: "opus"}
+	if _, err := c.Generate(context.Background(), huge, ""); err != nil {
+		t.Fatalf("Generate() with a 3MiB prompt: %v", err)
+	}
+	got, err := os.ReadFile(stdinFile)
+	if err != nil {
+		t.Fatalf("read stdin capture: %v", err)
+	}
+	if len(got) != len(huge) {
+		t.Fatalf("stdin got %d bytes, want %d", len(got), len(huge))
+	}
+	raw, _ := os.ReadFile(argsFile)
+	for _, a := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
+		if len(a) > 1024 {
+			t.Fatalf("a large argument reached argv (len=%d); prompt must be on stdin", len(a))
+		}
+	}
+}

@@ -26,16 +26,15 @@ func stageFakeCodex(t *testing.T, script string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// stageFakeCodexCapturePrompt stages a fake codex that writes its final argv
-// (the prompt) to the file at the PROMPT_CAPTURE_FILE env var and emits a
+// stageFakeCodexCapturePrompt stages a fake codex that writes the prompt it
+// receives on stdin to the file at the PROMPT_CAPTURE_FILE env var and emits a
 // minimal valid stream. Using an env var avoids shell-quoting hazards if the
 // temp path contains spaces or shell metacharacters.
 func stageFakeCodexCapturePrompt(t *testing.T, promptFile string) {
 	t.Helper()
 	stageFakeCodex(t, `#!/bin/sh
-# The prompt is the last positional arg.
-for arg in "$@"; do last="$arg"; done
-printf '%s' "$last" > "$PROMPT_CAPTURE_FILE"
+# The prompt arrives on stdin (argv carries "-").
+cat > "$PROMPT_CAPTURE_FILE"
 echo '{"type":"item.completed","item":{"id":"i1","type":"agent_message","text":"ok"}}'
 echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
 `)
@@ -794,5 +793,47 @@ func TestParseCodexStreamLine(t *testing.T) {
 				t.Fatalf("txt = %q, want %q", txt, tc.wantTxt)
 			}
 		})
+	}
+}
+
+// TestGenerate_PromptOnStdin is the regression guard for the ARG_MAX crash:
+// the prompt must travel on stdin (argv carries "-"), so a job prompt with a
+// full item feed larger than a typical ARG_MAX (~2MB) round-trips cleanly.
+func TestGenerate_PromptOnStdin(t *testing.T) {
+	promptFile := filepath.Join(t.TempDir(), "prompt.txt")
+	stageFakeCodexCapturePrompt(t, promptFile)
+
+	huge := strings.Repeat("x", 3<<20) // 3 MiB, past a typical 2 MiB ARG_MAX
+	c := &Client{Label: "test", Model: "gpt-5"}
+	if _, err := c.Generate(context.Background(), huge, ""); err != nil {
+		t.Fatalf("Generate() with a 3MiB prompt: %v", err)
+	}
+	got, err := os.ReadFile(promptFile)
+	if err != nil {
+		t.Fatalf("read prompt capture: %v", err)
+	}
+	if len(got) != len(huge) {
+		t.Fatalf("stdin got %d bytes, want %d", len(got), len(huge))
+	}
+}
+
+// TestGenerate_ArgvCarriesStdinMarker verifies the final positional arg is the
+// stdin marker "-", not the prompt itself.
+func TestGenerate_ArgvCarriesStdinMarker(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	stageFakeCodexCaptureArgs(t, argsFile)
+	c := &Client{Label: "test", Model: "gpt-5"}
+	if _, err := c.Generate(context.Background(), "the prompt", "the system"); err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	raw, _ := os.ReadFile(argsFile)
+	args := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	if last := args[len(args)-1]; last != "-" {
+		t.Fatalf("final argv = %q, want %q (prompt must be on stdin)", last, "-")
+	}
+	for _, a := range args {
+		if strings.Contains(a, "the prompt") {
+			t.Fatalf("the prompt reached argv: %v", args)
+		}
 	}
 }
