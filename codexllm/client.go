@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -183,7 +184,10 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 	observedOrder := []string{}
 	observedSeen := map[string]struct{}{}
 	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	// One stream event carries a whole message, so a line can run to
+	// megabytes; a cap the stream exceeds ends this loop early and loses
+	// the result.
+	scanner.Buffer(make([]byte, 0, 256*1024), 16*1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -207,8 +211,12 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 			}
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		log.Printf("[%s] stdout scan error: %v", label, err)
+	scanErr := scanner.Err()
+	if scanErr != nil {
+		log.Printf("[%s] stdout scan error: %v", label, scanErr)
+		// The child may still be writing; drain so it can exit instead of
+		// blocking on a full pipe until the timeout.
+		_, _ = io.Copy(io.Discard, stdout)
 	}
 
 	elapsed := time.Since(started).Round(time.Millisecond)
@@ -226,6 +234,9 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 		return "", nil, fmt.Errorf("%s: codex exited with error after %s: %w", label, elapsed, waitErr)
 	}
 
+	if scanErr != nil {
+		return "", nil, fmt.Errorf("%s: reading codex output after %s: %w", label, elapsed, scanErr)
+	}
 	log.Printf("[%s] completed in %s (events=%d, result_len=%d, web_search=%d, observed_urls=%d)", label, elapsed, eventCount, len(result), webSearchCount, len(observedOrder))
 
 	if strings.TrimSpace(result) == "" {

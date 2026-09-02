@@ -209,9 +209,16 @@ type Item struct {
 	// waits on: until that item is done or closed the queue never offers
 	// this one and a claim is refused. "" is no dependency.
 	After string `json:"after"`
-	// Held parks an open item: the queue never offers it and a claim is
-	// refused until the owner lifts the hold. Only an open item is held.
-	Held      bool   `json:"held"`
+	// Held parks an item: the queue never offers it and a claim is refused
+	// until the owner lifts the hold. The owner holds an item that is open,
+	// in review or approved (not one under a live lease); the tracker holds
+	// one itself after MaxItemFailures consecutive failed runs.
+	Held bool `json:"held"`
+	// Failures counts consecutive failed runs (crashed, timeout, skipped, or
+	// an agent-reported failure) since the last run that settled; FinishRun
+	// maintains it, a settled run or an unhold resets it, and at
+	// MaxItemFailures the item is held for the owner.
+	Failures  int    `json:"failures"`
 	CreatedBy string `json:"created_by"`
 	// Revision bumps on every write; the API's X-Base-Revision precondition
 	// stands on it.

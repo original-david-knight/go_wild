@@ -347,10 +347,11 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 		if assignTo != it.Assignee {
 			switch {
 			case it.Status == StatusOpen:
-			case it.Status == StatusInProgress && LeaseExpired(it, now):
-				// The holder's runner died. The item keeps its branch and
-				// implementer and resumes under the new worker from its
-				// next check-in; the dead holder's lease goes.
+			case it.Status == StatusInProgress && !leaseLive(it, now):
+				// Nobody is live on it: the holder's runner died (expired
+				// lease), or a review sent it back and the lease is zero.
+				// The item keeps its branch and implementer and resumes
+				// under the new worker from its next check-in.
 				assignFrom = it.Assignee
 				it.ClaimedAt = time.Time{}
 				it.LeaseExpiresAt = time.Time{}
@@ -565,13 +566,15 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		if held != nil && held.ID != it.ID {
 			return nil, invalidf("%s already holds live work", actor)
 		}
+		// A hold parks the item whatever its status: the owner set it, or
+		// the tracker did after repeated failed runs.
+		if it.Held {
+			return nil, invalidf("held by the owner")
+		}
 		switch from {
 		case StatusOpen:
 			if it.Assignee != "" && it.Assignee != actor {
 				return nil, invalidf("%s is assigned to %s", from, it.Assignee)
-			}
-			if it.Held {
-				return nil, invalidf("held by the owner")
 			}
 			settled, err := s.afterSettled(ctx, db, it)
 			if err != nil {
@@ -780,8 +783,19 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		to = StatusOpen
 		if it.Assignee == "" {
 			// A done or closed item lost its holder on the way out: it goes
-			// back to its implementer, else to the default worker.
+			// back to its implementer — if that worker still exists — else
+			// to the default worker. A ghost assignee would park the item
+			// forever: the queue offers by assignee and every claim is
+			// refused with its name.
 			it.Assignee = it.Implementer
+			if it.Assignee != "" {
+				if _, err := s.agentByName(ctx, db, it.Assignee); err != nil {
+					if !errors.Is(err, ErrNotFound) {
+						return nil, err
+					}
+					it.Assignee = ""
+				}
+			}
 			if it.Assignee == "" {
 				def, err := s.defaultAgent(ctx, db)
 				if err != nil {
@@ -800,28 +814,37 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		if !isOwner {
 			return nil, forbiddenf("only the owner holds an item")
 		}
-		if from != StatusOpen {
+		// Open, in-review and approved items can be parked — approved is the
+		// escape hatch for a merge that cannot land. A live lease means a
+		// run is going; wait for it or disable the agent.
+		if from != StatusOpen && from != StatusInReview && from != StatusApproved {
 			return nil, invalidf("cannot hold from %s", from)
+		}
+		if leaseLive(it, now) {
+			return nil, invalidf("a run holds this item until %s; wait for it or disable the agent", it.LeaseExpiresAt.Format(time.RFC3339))
 		}
 		if it.Held {
 			return nil, invalidf("already held")
 		}
 		it.Held = true
-		to = StatusOpen
+		to = from
 	case ActionUnhold:
 		if !isOwner {
 			return nil, forbiddenf("only the owner lifts a hold")
 		}
 		// A held item that was closed keeps its hold; reopen brings it back
 		// still parked, and the unhold happens there.
-		if from != StatusOpen {
+		if from == StatusDone || from == StatusClosed {
 			return nil, invalidf("cannot unhold from %s", from)
 		}
 		if !it.Held {
 			return nil, invalidf("not held")
 		}
 		it.Held = false
-		to = StatusOpen
+		// A hold set by the tracker after repeated failures starts the item
+		// on a clean slate; lifting it means the owner dealt with the cause.
+		it.Failures = 0
+		to = from
 	case ActionClose:
 		if !isOwner {
 			return nil, forbiddenf("only the owner closes")

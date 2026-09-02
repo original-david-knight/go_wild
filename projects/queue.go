@@ -2,6 +2,7 @@ package gowild_projects
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -92,11 +93,25 @@ func (s *Service) CheckIn(ctx context.Context, agent string, claim bool) (*Job, 
 				if _, err := s.applyTransition(ctx, db, c.item, c.project, TransitionInput{Actor: agent, Action: ActionClaim}); err != nil {
 					// Lost a race or the rules moved under us: skip it and
 					// try the next candidate rather than fail the check-in.
-					continue
+					// Anything else — the store failing mid-claim — has to
+					// surface, or an outage reads as "no work".
+					if errors.Is(err, ErrInvalidTransition) || errors.Is(err, ErrForbidden) || errors.Is(err, ErrNotFound) {
+						continue
+					}
+					return nil, err
 				}
 			}
 		}
-		return s.buildJob(ctx, db, c)
+		job, err := s.buildJob(ctx, db, c)
+		if err != nil && claim && c.mention == nil {
+			// The claim landed but the job could not be assembled; without a
+			// release the agent is wedged behind its own live lease until it
+			// expires, and every later check-in answers "no work".
+			if _, rerr := s.applyTransition(ctx, db, c.item, c.project, TransitionInput{Actor: agent, Action: ActionRelease, Body: "the check-in could not assemble the job: " + err.Error()}); rerr != nil {
+				return nil, fmt.Errorf("build job: %w (and the release failed: %v)", err, rerr)
+			}
+		}
+		return job, err
 	}
 	return nil, nil
 }
@@ -220,7 +235,7 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 	SortItems(approved)
 	for _, it := range approved {
 		p := workable(it.ProjectID)
-		if p == nil || leaseLive(it, now) {
+		if p == nil || leaseLive(it, now) || it.Held {
 			continue
 		}
 		kind := JobMerge
@@ -238,7 +253,7 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 	SortItems(inReview)
 	for _, it := range inReview {
 		p := workable(it.ProjectID)
-		if p == nil || it.Implementer == agent {
+		if p == nil || it.Implementer == agent || it.Held {
 			continue
 		}
 		if it.Reviewer != "" && !LeaseExpired(it, now) {
@@ -258,7 +273,7 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 	}
 	SortItems(inProgress)
 	for _, it := range inProgress {
-		if p := workable(it.ProjectID); p != nil && !leaseLive(it, now) {
+		if p := workable(it.ProjectID); p != nil && !leaseLive(it, now) && !it.Held {
 			out = append(out, candidate{kind: JobImplement, item: it, project: p})
 		}
 	}

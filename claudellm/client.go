@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -123,7 +124,10 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 	lastEventTime := time.Now()
 	eventCount := 0
 	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	// One stream-json event carries a whole assistant message, so a line can
+	// run to megabytes; a cap the stream exceeds used to end this loop
+	// silently and present as a hung run.
+	scanner.Buffer(make([]byte, 0, 256*1024), 16*1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -136,6 +140,12 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 		if ok {
 			result = text
 		}
+	}
+	scanErr := scanner.Err()
+	if scanErr != nil {
+		// The child may still be writing; drain so it can exit instead of
+		// blocking on a full pipe until the timeout.
+		_, _ = io.Copy(io.Discard, stdout)
 	}
 
 	elapsed := time.Since(started).Round(time.Millisecond)
@@ -151,6 +161,9 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 		return "", fmt.Errorf("%s: claude exited with error after %s: %w", label, elapsed, err)
 	}
 
+	if scanErr != nil {
+		return "", fmt.Errorf("%s: reading claude output after %s: %w", label, elapsed, scanErr)
+	}
 	log.Printf("[%s] completed in %s (events=%d, result_len=%d)", label, elapsed, eventCount, len(result))
 
 	if strings.TrimSpace(result) == "" {

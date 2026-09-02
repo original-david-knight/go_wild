@@ -22,6 +22,13 @@ const (
 // OutputTailMax caps what a run keeps of the agent's output, in runes.
 const OutputTailMax = 4000
 
+// MaxItemFailures is how many consecutive failed runs an item takes before
+// the tracker holds it for the owner. Without the cap a failing job is
+// re-offered the moment it is released — priority-1 merge jobs retried at
+// full speed forever in the crash-loops of 2026-09-01 and 2026-09-02 —
+// and the worker never reaches the rest of its queue.
+const MaxItemFailures = 3
+
 // Run is one execution of an agent by the runner: what it was asked to do,
 // how long it took, how it ended, and the tail of what it printed. It is the
 // answer to "what did claude do at three in the morning".
@@ -154,7 +161,63 @@ func (s *Service) FinishRun(ctx context.Context, id string, res RunResult) (*Run
 	if err := db.Table(Run{}).Update(ctx, run); err != nil {
 		return nil, err
 	}
+	if err := s.noteRunOutcome(ctx, db, run, now); err != nil {
+		return nil, err
+	}
 	return run, nil
+}
+
+// noteRunOutcome maintains the item's consecutive-failure count from the
+// run that just finished: a failed run raises it and, at MaxItemFailures,
+// holds the item with a comment saying why; a settled run resets it. An
+// item that vanished has nothing to maintain.
+func (s *Service) noteRunOutcome(ctx context.Context, db gowild_data.Database, run *Run, now time.Time) error {
+	if run.ItemID == "" {
+		return nil
+	}
+	it, err := gowild_dbx.Get[Item](ctx, db, run.ItemID)
+	if err != nil || it == nil {
+		return err
+	}
+	failed := false
+	switch run.Outcome {
+	case RunOutcomeCrashed, RunOutcomeTimeout, RunOutcomeSkipped, "failed":
+		failed = true
+	}
+	if !failed {
+		if it.Failures == 0 {
+			return nil
+		}
+		it.Failures = 0
+		it.UpdatedAt = now
+		return db.Table(Item{}).Update(ctx, it)
+	}
+	it.Failures++
+	holdNow := it.Failures >= MaxItemFailures && !it.Held
+	if holdNow {
+		it.Held = true
+	}
+	it.UpdatedAt = now
+	if err := db.Table(Item{}).Update(ctx, it); err != nil {
+		return err
+	}
+	if !holdNow {
+		return nil
+	}
+	p, err := gowild_dbx.Get[Project](ctx, db, it.ProjectID)
+	if err != nil {
+		return err
+	}
+	key := it.ID
+	if p != nil {
+		key = ItemKey(p, it)
+	}
+	body := fmt.Sprintf("Runner (%s): %d consecutive runs on this item failed; the tracker holds it so the queue moves on. When the cause is dealt with, pm unhold %s resumes it.", run.Agent, it.Failures, key)
+	c := &Comment{
+		ID: newID(), TargetKind: TargetItem, TargetID: it.ID, Author: run.Agent,
+		Kind: CommentKindComment, Body: body, CreatedAt: now,
+	}
+	return db.Table(Comment{}).Insert(ctx, c)
 }
 
 // GetRun reads one run.

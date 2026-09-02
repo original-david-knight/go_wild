@@ -557,6 +557,19 @@ func (s *Service) DeleteAgent(ctx context.Context, name string) error {
 			return fmt.Errorf("%w: %s is the assignee of an item that is not done or closed; reassign it first", ErrConflict, name)
 		}
 	}
+	// In-flight items past submit have no assignee, but their merge job
+	// matches only the implementer: deleting that worker strands them in
+	// approved until the owner completes by hand.
+	implementing, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{
+		Where:   map[string]any{"implementer": name},
+		WhereIn: map[string][]any{"status": {StatusInReview, StatusPendingApproval, StatusApproved}},
+	})
+	if err != nil {
+		return err
+	}
+	if len(implementing) > 0 {
+		return fmt.Errorf("%w: %s is the implementer of an item that is still in flight; let it finish or close it first", ErrConflict, name)
+	}
 	return db.Table(Agent{}).Delete(ctx, name)
 }
 
