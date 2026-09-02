@@ -274,7 +274,13 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 	SortItems(inProgress)
 	for _, it := range inProgress {
 		if p := workable(it.ProjectID); p != nil && !leaseLive(it, now) && !it.Held {
-			out = append(out, candidate{kind: JobImplement, item: it, project: p})
+			// A resumed item that was never groomed (its groom job crashed)
+			// resumes as a groom job, not an implement.
+			kind := JobImplement
+			if it.NeedsGroom {
+				kind = JobGroom
+			}
+			out = append(out, candidate{kind: kind, item: it, project: p})
 		}
 	}
 
@@ -300,7 +306,12 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 		if !settled {
 			continue
 		}
-		out = append(out, candidate{kind: JobImplement, item: it, project: p})
+		// A raw ticket is groomed into a spec before it is implemented.
+		kind := JobImplement
+		if it.NeedsGroom {
+			kind = JobGroom
+		}
+		out = append(out, candidate{kind: kind, item: it, project: p})
 	}
 	return out, nil
 }

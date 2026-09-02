@@ -30,6 +30,10 @@ type ItemInput struct {
 	// Held files the item parked: the queue skips it until the owner
 	// lifts the hold.
 	Held bool
+	// Specced says the description is already a spec: no groom job. A raw
+	// feature or bug filed without it is groomed before it is implemented;
+	// chores are never groomed.
+	Specced bool
 }
 
 // ItemPatch is a partial edit of the descriptive fields; nil leaves a field
@@ -69,6 +73,10 @@ type TransitionInput struct {
 	Branch  string
 	PRURL   string
 	Verdict string
+	// Description and Assignee belong to ActionGroom: the spec the groomer
+	// wrote, and the worker it hands the item to ("" keeps the assignee).
+	Description string
+	Assignee    string
 }
 
 // CreateItem files an item under the project, numbering it from the
@@ -151,7 +159,11 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 		ID: newID(), ProjectID: p.ID, Number: number, Type: in.Type,
 		Title: strings.TrimSpace(in.Title), Description: in.Description, Priority: in.Priority,
 		Status: StatusOpen, Assignee: in.Assignee, Label: label, After: after, Held: in.Held,
-		CreatedBy: in.CreatedBy, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		// A raw feature or bug is groomed into a spec before it is
+		// implemented; a chore, or a ticket filed as already specced, goes
+		// straight to work.
+		NeedsGroom: !in.Specced && in.Type != TypeChore,
+		CreatedBy:  in.CreatedBy, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := db.Table(Item{}).Insert(ctx, it); err != nil {
 		return nil, err
@@ -712,6 +724,39 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		it.LastVerdict, it.LastVerdictBy, it.LastVerdictAt = verdict, actor, now
 		clearLease()
 		clearFor = actor
+	case ActionGroom:
+		if isOwner {
+			return nil, forbiddenf("the owner edits a ticket directly; groom is the groomer's transition")
+		}
+		if from != StatusInProgress {
+			return nil, invalidf("cannot groom from %s", from)
+		}
+		if it.Assignee != actor {
+			return nil, forbiddenf("held by %s", it.Assignee)
+		}
+		if !it.NeedsGroom {
+			return nil, invalidf("the item is not awaiting grooming")
+		}
+		if strings.TrimSpace(in.Description) == "" {
+			return nil, validationf("groom needs the spec as the description")
+		}
+		if handTo := strings.TrimSpace(in.Assignee); handTo != "" && handTo != it.Assignee {
+			if _, err := s.agentByName(ctx, db, handTo); err != nil {
+				if errors.Is(err, ErrNotFound) {
+					return nil, validationf("assignee %q is not a worker", handTo)
+				}
+				return nil, err
+			}
+			it.Assignee = handTo
+		}
+		// The spec replaces the raw ticket; the raw text survives in the
+		// feed only if the groomer quotes it. Back to open, ready for the
+		// implement job.
+		it.Description = strings.TrimSpace(in.Description)
+		it.NeedsGroom = false
+		to = StatusOpen
+		clearLease()
+		clearFor = actor
 	case ActionBlock:
 		if isOwner {
 			return nil, forbiddenf("the owner closes or reopens, not blocks")
@@ -881,6 +926,13 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 	}
 	if err := s.recordMentions(ctx, db, body, RoomItem, it.ID, p.ID, "comment", c.ID, actor, now); err != nil {
 		return nil, err
+	}
+	if in.Action == ActionGroom {
+		// The spec is a new description; its mentions sync the way an
+		// owner's edit does.
+		if err := s.syncMentions(ctx, db, it.Description, RoomItem, it.ID, p.ID, "item", it.ID, actor, now); err != nil {
+			return nil, err
+		}
 	}
 	if !isOwner {
 		if err := s.markAnswered(ctx, db, actor, RoomItem, it.ID, now); err != nil {

@@ -91,6 +91,10 @@ const (
 	// status does not move. The owner only.
 	ActionHold   = "hold"
 	ActionUnhold = "unhold"
+	// ActionGroom is a groom job settling: the groomer replaces the raw
+	// description with the spec it wrote, may hand the item to another
+	// worker, and the item returns to open ready for its implement job.
+	ActionGroom = "groom"
 )
 
 // Worker CLIs — which command the runner spawns for an agent.
@@ -137,6 +141,10 @@ const (
 	JobReview      = "review"
 	JobMerge       = "merge"
 	JobPullRequest = "pull_request"
+	// JobGroom turns a raw ticket into a spec before any implement job: the
+	// assignee reads the code, rewrites the description, splits the work
+	// into after-chained items when it is really several, and assigns.
+	JobGroom = "groom"
 )
 
 // Mention rooms — where an @mention was made and where its answer belongs.
@@ -218,8 +226,12 @@ type Item struct {
 	// an agent-reported failure) since the last run that settled; FinishRun
 	// maintains it, a settled run or an unhold resets it, and at
 	// MaxItemFailures the item is held for the owner.
-	Failures  int    `json:"failures"`
-	CreatedBy string `json:"created_by"`
+	Failures int `json:"failures"`
+	// NeedsGroom marks a raw ticket that gets a groom job before any
+	// implement job: a feature or bug filed without the specced flag. The
+	// groom transition clears it.
+	NeedsGroom bool   `json:"needs_groom"`
+	CreatedBy  string `json:"created_by"`
 	// Revision bumps on every write; the API's X-Base-Revision precondition
 	// stands on it.
 	Revision  int       `json:"revision"`

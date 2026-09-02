@@ -114,7 +114,7 @@ func (s *Service) StartRun(ctx context.Context, in RunInput) (*Run, error) {
 		return nil, validationf("run agent %q is not an agent name", in.Agent)
 	}
 	switch in.Kind {
-	case JobRespond, JobImplement, JobReview, JobMerge, JobPullRequest:
+	case JobRespond, JobImplement, JobReview, JobMerge, JobPullRequest, JobGroom:
 	default:
 		return nil, validationf("run kind %q is unknown", in.Kind)
 	}

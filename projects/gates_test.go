@@ -15,12 +15,12 @@ func TestAfterGateBlocksUntilSettled(t *testing.T) {
 	f := newFixture(t)
 	f.workers()
 	f.project("EA")
-	first, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "first", Assignee: "codex"})
+	first, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "first", Assignee: "codex", Specced: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.tick(time.Second)
-	second, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "second", Assignee: "claude", After: "ea-1"})
+	second, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "second", Assignee: "claude", After: "ea-1", Specced: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,11 +48,11 @@ func TestAfterGateLiftsWhenTheDependencyIsDone(t *testing.T) {
 	f := newFixture(t)
 	f.workers()
 	f.project("EA")
-	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "dep", Assignee: "claude"}); err != nil {
+	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "dep", Assignee: "claude", Specced: true}); err != nil {
 		t.Fatal(err)
 	}
 	f.tick(time.Second)
-	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "waiter", Assignee: "claude", After: "EA-1"}); err != nil {
+	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "waiter", Assignee: "claude", After: "EA-1", Specced: true}); err != nil {
 		t.Fatal(err)
 	}
 	f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim})

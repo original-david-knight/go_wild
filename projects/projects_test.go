@@ -43,9 +43,11 @@ func (f *fixture) project(key string) *Project {
 	return p
 }
 
+// item files a specced bug: ready for its implement job, no grooming. The
+// groom path has its own tests over raw items.
 func (f *fixture) item(project, title string) *Item {
 	f.t.Helper()
-	it, err := f.s.CreateItem(f.ctx, project, ItemInput{Title: title, Type: TypeBug})
+	it, err := f.s.CreateItem(f.ctx, project, ItemInput{Title: title, Type: TypeBug, Specced: true})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -276,12 +278,12 @@ func TestCheckInQueueOrder(t *testing.T) {
 	f.workers()
 	f.project("EA")
 	f.item("EA", "low thing")
-	urgent, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "urgent thing", Priority: PriorityUrgent})
+	urgent, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "urgent thing", Priority: PriorityUrgent, Specced: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.tick(time.Second)
-	forCodex, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "for codex", Assignee: "codex"})
+	forCodex, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "for codex", Assignee: "codex", Specced: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -879,7 +881,7 @@ func TestAssignmentIsExclusiveWhenSet(t *testing.T) {
 	if feed, _ := f.s.ItemComments(f.ctx, def.ID); len(feed) != 0 {
 		t.Fatalf("default stamping in the feed: %+v", feed[0])
 	}
-	it, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "for codex", Assignee: "codex"})
+	it, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "for codex", Assignee: "codex", Specced: true})
 	if err != nil || it.Assignee != "codex" {
 		t.Fatalf("assigned create: %v %+v", err, it)
 	}
@@ -1315,7 +1317,7 @@ func TestWaitWakesOnReassignment(t *testing.T) {
 	f := newFixture(t)
 	f.workers()
 	f.project("EA")
-	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "for codex", Assignee: "codex"}); err != nil {
+	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "for codex", Assignee: "codex", Specced: true}); err != nil {
 		t.Fatal(err)
 	}
 	f.tick(time.Second)
