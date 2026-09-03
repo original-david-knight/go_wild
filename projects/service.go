@@ -506,15 +506,21 @@ func (s *Service) UpdateAgent(ctx context.Context, name string, patch AgentPatch
 		if *patch.Slots < 1 {
 			return nil, validationf("slots %d is not a positive number", *patch.Slots)
 		}
-		rotation = rotation || a.Slots != *patch.Slots
+		rotation = rotation || a.SlotsOrDefault() != *patch.Slots
 		a.Slots = *patch.Slots
 	}
 	if patch.Lead != nil && !*patch.Lead {
 		return nil, fmt.Errorf("%w: a tier's lead is moved, not cleared; make another worker of the tier the lead", ErrConflict)
 	}
-	moveTier := patch.Tier != nil && *patch.Tier != a.TierOrDefault()
 	if patch.Tier != nil && *patch.Tier < 1 {
 		return nil, validationf("tier %d is not a positive number", *patch.Tier)
+	}
+	moveTier := patch.Tier != nil && *patch.Tier != a.TierOrDefault()
+	// A row from before tiers stores zero, which reads as the baseline: a
+	// patch naming that same number moves nothing but still writes the
+	// column, so the stored value stops being a zero nobody can see.
+	if patch.Tier != nil && !moveTier {
+		a.Tier = *patch.Tier
 	}
 	makeLead := patch.Lead != nil && (!a.Lead || moveTier)
 	if !moveTier && !makeLead {

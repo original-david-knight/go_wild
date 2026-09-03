@@ -4,17 +4,24 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	gowild_data "github.com/original-david-knight/go_wild/data"
 )
 
+// fixture is one in-memory tracker with a clock the test drives. The clock
+// is guarded: a parked Wait re-reads it on another goroutine (availability
+// ends on the clock), while the test advances it from its own. Production
+// passes time.Now, which is safe already.
 type fixture struct {
 	t   *testing.T
 	ctx context.Context
 	s   *Service
-	now time.Time
+
+	clockMu sync.Mutex
+	clock   time.Time
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -27,12 +34,23 @@ func newFixture(t *testing.T) *fixture {
 	if err := gowild_data.AddAllTables(db); err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{t: t, ctx: context.Background(), now: time.Date(2026, 8, 28, 9, 0, 0, 0, time.UTC)}
-	f.s = NewService(func() gowild_data.Database { return db }, WithClock(func() time.Time { return f.now }))
+	f := &fixture{t: t, ctx: context.Background(), clock: time.Date(2026, 8, 28, 9, 0, 0, 0, time.UTC)}
+	f.s = NewService(func() gowild_data.Database { return db }, WithClock(f.at))
 	return f
 }
 
-func (f *fixture) tick(d time.Duration) { f.now = f.now.Add(d) }
+// at is the fixture's clock, as the service reads it.
+func (f *fixture) at() time.Time {
+	f.clockMu.Lock()
+	defer f.clockMu.Unlock()
+	return f.clock
+}
+
+func (f *fixture) tick(d time.Duration) {
+	f.clockMu.Lock()
+	defer f.clockMu.Unlock()
+	f.clock = f.clock.Add(d)
+}
 
 func (f *fixture) project(key string) *Project {
 	f.t.Helper()
@@ -426,7 +444,7 @@ func TestExpiredLeaseStaysWithItsWorker(t *testing.T) {
 		t.Fatalf("expired lease not offered to its worker: %v %+v", err, job)
 	}
 	it := f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim})
-	if it.Status != StatusInProgress || it.Assignee != "claude" || !it.LeaseExpiresAt.After(f.now) {
+	if it.Status != StatusInProgress || it.Assignee != "claude" || !it.LeaseExpiresAt.After(f.at()) {
 		t.Fatalf("reclaim: %+v", it)
 	}
 	if !f.holds("claude", it.ID) {

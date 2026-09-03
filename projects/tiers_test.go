@@ -34,9 +34,9 @@ func (f *fixture) report(agent string, q QuotaReport) {
 // real reading on 2026-09-03) and a fresh five-hour window.
 func (f *fixture) spentWeek() QuotaReport {
 	return QuotaReport{
-		Session: QuotaWindow{Used: 5, ResetsAt: f.now.Add(4 * time.Hour)},
-		Weekly:  QuotaWindow{Used: 52, ResetsAt: f.now.Add(26 * time.Hour)},
-		Scoped:  []ScopedQuota{{Model: "Fable", QuotaWindow: QuotaWindow{Used: 92, ResetsAt: f.now.Add(26 * time.Hour)}}},
+		Session: QuotaWindow{Used: 5, ResetsAt: f.at().Add(4 * time.Hour)},
+		Weekly:  QuotaWindow{Used: 52, ResetsAt: f.at().Add(26 * time.Hour)},
+		Scoped:  []ScopedQuota{{Model: "Fable", QuotaWindow: QuotaWindow{Used: 92, ResetsAt: f.at().Add(26 * time.Hour)}}},
 	}
 }
 
@@ -66,6 +66,50 @@ func (f *fixture) peek(agent string) *Item {
 		return nil
 	}
 	return job.Item
+}
+
+// A row from before tiers stores zero in both columns, which reads as the
+// baseline; a patch naming that same baseline writes the column rather than
+// passing as a no-op, so the stored value stops being an invisible zero.
+func TestPatchingToTheDefaultWritesTheColumn(t *testing.T) {
+	f := newFixture(t)
+	f.tiered()
+	db, err := f.s.database()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := f.s.GetAgent(f.ctx, "opus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Write the row the way a service from before tiers left it.
+	old.Tier, old.Slots = 0, 0
+	if err := db.Table(Agent{}).Update(f.ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := f.s.GetAgent(f.ctx, "opus"); a.TierOrDefault() != DefaultTier || a.SlotsOrDefault() != DefaultSlots {
+		t.Fatalf("a zero row does not read as the baseline: %+v", a)
+	}
+	ten, three := DefaultTier, DefaultSlots
+	got, err := f.s.UpdateAgent(f.ctx, "opus", AgentPatch{Tier: &ten, Slots: &three})
+	if err != nil || got.Tier != DefaultTier || got.Slots != DefaultSlots {
+		t.Fatalf("patch to the baseline: %v %+v", err, got)
+	}
+	if a, _ := f.s.GetAgent(f.ctx, "opus"); a.Tier != DefaultTier || a.Slots != DefaultSlots {
+		t.Fatalf("stored row still zero: %+v", a)
+	}
+	// It is still the lead of its tier, and still pulls tier 10's pool.
+	if !got.Lead {
+		t.Fatalf("the patch moved the lead: %+v", got)
+	}
+	f.project("EA")
+	it, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "for ten", Tier: DefaultTier, Specced: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.offered("opus"); got == nil || got.ID != it.ID {
+		t.Fatalf("tier 10's pool not offered after the patch: %+v", got)
+	}
 }
 
 func TestAvailabilityDerivesFromTheWindows(t *testing.T) {
@@ -122,16 +166,16 @@ func TestQuotaReportPicksTheTightestWeekly(t *testing.T) {
 	f.tiered()
 	f.report("fable", f.spentWeek())
 	fable, _ := f.s.GetAgent(f.ctx, "fable")
-	if fable.QuotaSessionUsed != 5 || fable.QuotaWeeklyUsed != 92 || fable.QuotaWeeklyScope != "Fable" || !fable.QuotaReportedAt.Equal(f.now) {
+	if fable.QuotaSessionUsed != 5 || fable.QuotaWeeklyUsed != 92 || fable.QuotaWeeklyScope != "Fable" || !fable.QuotaReportedAt.Equal(f.at()) {
 		t.Fatalf("fable's report: %+v", fable)
 	}
-	if av := fable.Availability(f.now); av.State != AvailabilityUnavailable || av.Window != QuotaWindowWeekly || av.Scope != "Fable" || av.Used != 92 {
+	if av := fable.Availability(f.at()); av.State != AvailabilityUnavailable || av.Window != QuotaWindowWeekly || av.Scope != "Fable" || av.Used != 92 {
 		t.Fatalf("fable's availability: %+v", av)
 	}
 	// The same account report leaves opus on the account-wide week.
 	f.report("opus", f.spentWeek())
 	opus, _ := f.s.GetAgent(f.ctx, "opus")
-	if opus.QuotaWeeklyUsed != 52 || opus.QuotaWeeklyScope != QuotaScopeAll || !opus.Availability(f.now).Available() {
+	if opus.QuotaWeeklyUsed != 52 || opus.QuotaWeeklyScope != QuotaScopeAll || !opus.Availability(f.at()).Available() {
 		t.Fatalf("opus's report: %+v", opus)
 	}
 	// A scoped window looser than the account-wide one is not taken.
@@ -143,7 +187,7 @@ func TestQuotaReportPicksTheTightestWeekly(t *testing.T) {
 	}
 	// A codex worker reports nothing and stays available.
 	sol, _ := f.s.GetAgent(f.ctx, "sol")
-	if !sol.Availability(f.now).Available() || !sol.QuotaReportedAt.IsZero() {
+	if !sol.Availability(f.at()).Available() || !sol.QuotaReportedAt.IsZero() {
 		t.Fatalf("sol: %+v", sol)
 	}
 }
@@ -197,7 +241,7 @@ func TestTierPoolLeadAndBackup(t *testing.T) {
 
 	// A break — five-hour window spent, reset within the hour — is not an
 	// outage: the lead pulls nothing and the pool waits for it.
-	f.report("fable", QuotaReport{Session: QuotaWindow{Used: 95, ResetsAt: f.now.Add(40 * time.Minute)}})
+	f.report("fable", QuotaReport{Session: QuotaWindow{Used: 95, ResetsAt: f.at().Add(40 * time.Minute)}})
 	if got := f.peek("fable"); got != nil {
 		t.Fatalf("lead on break handed work: %+v", got)
 	}
@@ -205,7 +249,7 @@ func TestTierPoolLeadAndBackup(t *testing.T) {
 		t.Fatalf("backup offered during the lead's break: %+v", got)
 	}
 	// The same spent window with two hours to go is an outage.
-	f.report("fable", QuotaReport{Session: QuotaWindow{Used: 95, ResetsAt: f.now.Add(2 * time.Hour)}})
+	f.report("fable", QuotaReport{Session: QuotaWindow{Used: 95, ResetsAt: f.at().Add(2 * time.Hour)}})
 	if got := f.offered("sol"); got == nil {
 		t.Fatal("backup not offered during the lead's session outage")
 	}
@@ -331,7 +375,7 @@ func TestPinningAnUnavailableWorkerIsRefused(t *testing.T) {
 		t.Fatalf("groomed item not in tier 10's pool: %+v", got)
 	}
 	// A break is pinnable.
-	f.report("fable", QuotaReport{Session: QuotaWindow{Used: 95, ResetsAt: f.now.Add(30 * time.Minute)}})
+	f.report("fable", QuotaReport{Session: QuotaWindow{Used: 95, ResetsAt: f.at().Add(30 * time.Minute)}})
 	got, err := f.s.UpdateItem(f.ctx, "EA-1", ItemPatch{Assignee: &fable}, 0)
 	if err != nil || got.Assignee != "fable" || got.ID != it.ID {
 		t.Fatalf("pin a worker on break: %v %+v", err, got)
