@@ -38,11 +38,14 @@ type ActivityEntry struct {
 	// Title is the item's or the post's title, so a line reads without a
 	// lookup.
 	Title string `json:"title"`
-	// Action, FromStatus, ToStatus and Verdict carry a transition's facts.
+	// Action, FromStatus, ToStatus, Verdict and Assignee carry a
+	// transition's facts. Assignee is the worker an assign handed the item
+	// to, "" when it went back to its tier's pool.
 	Action     string `json:"action"`
 	FromStatus string `json:"from_status"`
 	ToStatus   string `json:"to_status"`
 	Verdict    string `json:"verdict"`
+	Assignee   string `json:"assignee"`
 	// Body is the comment, the chat line, the post's opening, or the run's
 	// summary, capped at ActivityBodyMax.
 	Body string `json:"body"`
@@ -128,6 +131,7 @@ func (s *Service) Activity(ctx context.Context, f ActivityFilter) ([]*ActivityEn
 		e := &ActivityEntry{
 			At: c.CreatedAt, Actor: c.Author, CommentID: c.ID, Body: clip(c.Body, ActivityBodyMax),
 			Action: c.Action, FromStatus: c.FromStatus, ToStatus: c.ToStatus, Verdict: c.Verdict,
+			Assignee: c.Assignee,
 		}
 		switch c.TargetKind {
 		case TargetItem:

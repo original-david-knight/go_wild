@@ -519,7 +519,7 @@ func (s *Service) recordAssign(ctx context.Context, db gowild_data.Database, it 
 	c := &Comment{
 		ID: newID(), TargetKind: TargetItem, TargetID: it.ID, Author: actor,
 		Kind: CommentKindTransition, Action: ActionAssign, FromStatus: it.Status, ToStatus: it.Status,
-		Body: body, CreatedAt: now,
+		Assignee: assignee, Body: body, CreatedAt: now,
 	}
 	return db.Table(Comment{}).Insert(ctx, c)
 }

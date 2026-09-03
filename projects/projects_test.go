@@ -480,7 +480,7 @@ func TestReassignResumesExpiredWorkUnderNewWorker(t *testing.T) {
 	}
 	feed, _ := f.s.ItemComments(f.ctx, got.ID)
 	last := feed[len(feed)-1]
-	if last.Action != ActionAssign || last.Body != "assigned to codex" || last.FromStatus != StatusInProgress || last.ToStatus != StatusInProgress {
+	if last.Action != ActionAssign || last.Body != "assigned to codex" || last.Assignee != "codex" || last.FromStatus != StatusInProgress || last.ToStatus != StatusInProgress {
 		t.Fatalf("assign feed line: %+v", last)
 	}
 	if job, _ := f.s.NextFor(f.ctx, "claude"); job != nil {
@@ -974,13 +974,20 @@ func TestAssignmentIsExclusiveWhenSet(t *testing.T) {
 	}
 	feed, _ := f.s.ItemComments(f.ctx, it.ID)
 	var assigns []string
+	var named []string
 	for _, c := range feed {
 		if c.Action == ActionAssign {
 			assigns = append(assigns, c.Body)
+			named = append(named, c.Assignee)
 		}
 	}
 	if len(assigns) != 3 || assigns[0] != "assigned to codex" || assigns[1] != "assigned to claude" || assigns[2] != "returned to the tier 10 pool" {
 		t.Fatalf("assign feed: %v", assigns)
+	}
+	// The name is a field of its own, not something read back out of the
+	// prose; an unpin leaves it empty.
+	if len(named) != 3 || named[0] != "codex" || named[1] != "claude" || named[2] != "" {
+		t.Fatalf("assign feed assignees: %q", named)
 	}
 	// Once claimed and live, the owner cannot swap the holder or unpin.
 	f.move("EA-2", TransitionInput{Actor: "claude", Action: ActionClaim})

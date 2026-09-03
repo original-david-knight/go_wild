@@ -262,6 +262,12 @@ type Comment struct {
 	FromStatus string `json:"from_status"`
 	ToStatus   string `json:"to_status"`
 	Verdict    string `json:"verdict"`
+	// Assignee is the worker an ActionAssign transition handed the item to,
+	// "" when that transition returned it to its tier's pool and on every
+	// other kind of row. It is the fact itself: Body phrases the same fact
+	// for a client to print, and no client parses that phrasing back apart
+	// to learn the name.
+	Assignee string `json:"assignee"`
 	// Body is markdown, served verbatim.
 	Body string `json:"body"`
 	// Mentions is the @names found in the body, comma-joined.
