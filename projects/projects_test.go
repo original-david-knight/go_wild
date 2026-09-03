@@ -88,6 +88,37 @@ func (f *fixture) workers() {
 	f.agent("codex")
 }
 
+// holding lists the item IDs the worker has a live lease on.
+func (f *fixture) holding(agent string) []string {
+	f.t.Helper()
+	items, err := f.s.Holding(f.ctx, agent)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	ids := make([]string, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.ID)
+	}
+	return ids
+}
+
+func (f *fixture) holds(agent, itemID string) bool {
+	for _, id := range f.holding(agent) {
+		if id == itemID {
+			return true
+		}
+	}
+	return false
+}
+
+// slots caps a worker's concurrent jobs.
+func (f *fixture) slots(agent string, n int) {
+	f.t.Helper()
+	if _, err := f.s.UpdateAgent(f.ctx, agent, AgentPatch{Slots: &n}); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
 func TestProjectKeysAndNumbering(t *testing.T) {
 	f := newFixture(t)
 	f.workers()
@@ -203,8 +234,8 @@ func TestHappyPathMergePolicy(t *testing.T) {
 		t.Fatalf("agents: %v %v", err, agents)
 	}
 	for _, a := range agents {
-		if a.CurrentItemID != "" {
-			t.Fatalf("%s still holds %s", a.ID, a.CurrentItemID)
+		if held := f.holding(a.ID); len(held) != 0 {
+			t.Fatalf("%s still holds %v", a.ID, held)
 		}
 	}
 }
@@ -230,9 +261,10 @@ func TestOwnerPaths(t *testing.T) {
 	if it.Status != StatusClosed || it.ClosedAt.IsZero() || it.Assignee != "" {
 		t.Fatalf("close: %+v", it)
 	}
-	// Closed before anyone implemented it: reopen falls back to the default worker.
+	// Closed before anyone implemented it: reopen puts it back in its
+	// tier's pool.
 	it = f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionReopen})
-	if it.Status != StatusOpen || !it.ClosedAt.IsZero() || it.Assignee != "claude" {
+	if it.Status != StatusOpen || !it.ClosedAt.IsZero() || it.Assignee != "" || it.Tier != DefaultTier {
 		t.Fatalf("reopen from closed: %+v", it)
 	}
 	// Owner request_changes from pending approval goes back to the implementer.
@@ -293,7 +325,7 @@ func TestCheckInQueueOrder(t *testing.T) {
 	if _, err := f.s.SetAgentEnabled(f.ctx, "claude", false); err != nil {
 		t.Fatal(err)
 	}
-	job, err := f.s.CheckIn(f.ctx, "claude", true)
+	job, err := f.s.CheckIn(f.ctx, "claude", true, nil)
 	if err != nil || job != nil {
 		t.Fatalf("disabled agent: %v %+v", err, job)
 	}
@@ -303,47 +335,55 @@ func TestCheckInQueueOrder(t *testing.T) {
 	}
 	f.s.SetAgentEnabled(f.ctx, "claude", true)
 
-	// Urgent first among the default worker's items, and the claim is made.
-	job, err = f.s.CheckIn(f.ctx, "claude", true)
+	// Urgent first out of the tier's pool — claude leads it — and the
+	// claim is made.
+	job, err = f.s.CheckIn(f.ctx, "claude", true, nil)
 	if err != nil || job == nil || job.Kind != JobImplement || job.Item.ID != urgent.ID || job.Item.Assignee != "claude" {
 		t.Fatalf("first job: %v %+v", err, job)
 	}
 	if job.Project == nil || job.Project.Key != "EA" || job.Pinned == nil || job.Chat == nil || job.Comments == nil {
 		t.Fatalf("job context: %+v", job)
 	}
-	// A live runner gets no second job, including its own item.
-	job, err = f.s.CheckIn(f.ctx, "claude", true)
-	if err != nil || job != nil {
-		t.Fatalf("duplicate live job: %v %+v", err, job)
+	// A second slot takes the pool's next item; a live item is never
+	// offered again.
+	job, err = f.s.CheckIn(f.ctx, "claude", true, nil)
+	if err != nil || job == nil || job.Item.Number != 1 {
+		t.Fatalf("second slot: %v %+v", err, job)
 	}
-	// Codex gets its own item, not claude's remaining one.
-	job, err = f.s.CheckIn(f.ctx, "codex", true)
+	if job, err = f.s.CheckIn(f.ctx, "claude", true, nil); err != nil || job != nil {
+		t.Fatalf("pool empty for claude, got %v %+v", err, job)
+	}
+	// Codex gets its own pinned item; the pool was claude's while claude
+	// was in.
+	job, err = f.s.CheckIn(f.ctx, "codex", true, nil)
 	if err != nil || job == nil || job.Item.ID != forCodex.ID || job.Item.Assignee != "codex" {
 		t.Fatalf("codex job: %v %+v", err, job)
 	}
 	// A name with no row is not a worker; a check-in does not create one.
-	if _, err := f.s.CheckIn(f.ctx, "gemini", true); !errors.Is(err, ErrNotFound) {
+	if _, err := f.s.CheckIn(f.ctx, "gemini", true, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("check-in without a row: %v", err)
 	}
 	if _, err := f.s.GetAgent(f.ctx, "gemini"); !errors.Is(err, ErrNotFound) {
 		t.Fatal("check-in created a row")
 	}
 
-	// Claude submits, but codex cannot take the review while its own lease is live.
+	// Claude submits; codex, its tier-mate, takes the review in a free
+	// slot, and with its slots all taken it could not.
 	f.move("EA-2", TransitionInput{Actor: "claude", Action: ActionSubmit, Branch: "pm/ea-2"})
-	job, err = f.s.CheckIn(f.ctx, "codex", true)
+	f.slots("codex", 1)
+	job, err = f.s.CheckIn(f.ctx, "codex", true, nil)
 	if err != nil || job != nil {
-		t.Fatalf("codex duplicate live job: %v %+v", err, job)
+		t.Fatalf("codex past its slots: %v %+v", err, job)
 	}
 	f.move("EA-3", TransitionInput{Actor: "codex", Action: ActionRelease})
-	job, err = f.s.CheckIn(f.ctx, "codex", true)
+	job, err = f.s.CheckIn(f.ctx, "codex", true, nil)
 	if err != nil || job.Kind != JobReview || job.Item.ID != urgent.ID || job.Item.Reviewer != "codex" {
 		t.Fatalf("review job: %v %+v", err, job)
 	}
 	f.move("EA-2", TransitionInput{Actor: "codex", Action: ActionReview, Verdict: VerdictApprove, Body: "fine"})
 	f.move("EA-2", TransitionInput{Actor: ActorOwner, Action: ActionApprove})
 	// Approved work of mine comes first, as a merge job under the merge policy.
-	job, err = f.s.CheckIn(f.ctx, "claude", true)
+	job, err = f.s.CheckIn(f.ctx, "claude", true, nil)
 	if err != nil || job.Kind != JobMerge || job.Item.ID != urgent.ID || job.Item.LeaseExpiresAt.IsZero() {
 		t.Fatalf("merge job: %v %+v", err, job)
 	}
@@ -389,9 +429,8 @@ func TestExpiredLeaseStaysWithItsWorker(t *testing.T) {
 	if it.Status != StatusInProgress || it.Assignee != "claude" || !it.LeaseExpiresAt.After(f.now) {
 		t.Fatalf("reclaim: %+v", it)
 	}
-	a, _ := f.s.GetAgent(f.ctx, "claude")
-	if a.CurrentItemID != it.ID {
-		t.Fatalf("claude not marked holding: %+v", a)
+	if !f.holds("claude", it.ID) {
+		t.Fatalf("claude not holding %s: %v", it.ID, f.holding("claude"))
 	}
 }
 
@@ -418,8 +457,8 @@ func TestReassignResumesExpiredWorkUnderNewWorker(t *testing.T) {
 	if !got.ClaimedAt.IsZero() || !got.LeaseExpiresAt.IsZero() {
 		t.Fatalf("dead lease kept: %+v", got)
 	}
-	if a, _ := f.s.GetAgent(f.ctx, "claude"); a.CurrentItemID != "" {
-		t.Fatalf("claude still marked holding %s", a.CurrentItemID)
+	if held := f.holding("claude"); len(held) != 0 {
+		t.Fatalf("claude still holding %v", held)
 	}
 	feed, _ := f.s.ItemComments(f.ctx, got.ID)
 	last := feed[len(feed)-1]
@@ -430,12 +469,12 @@ func TestReassignResumesExpiredWorkUnderNewWorker(t *testing.T) {
 		t.Fatalf("reassigned item still offered to claude: %+v", job)
 	}
 	f.refuse("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim}, ErrForbidden)
-	job, err := f.s.CheckIn(f.ctx, "codex", true)
+	job, err := f.s.CheckIn(f.ctx, "codex", true, nil)
 	if err != nil || job == nil || job.Kind != JobImplement || job.Item.ID != got.ID || job.Item.Assignee != "codex" || job.Item.Branch != "pm/ea-1-half" {
 		t.Fatalf("resumed under codex: %v %+v", err, job)
 	}
-	if a, _ := f.s.GetAgent(f.ctx, "codex"); a.CurrentItemID != got.ID {
-		t.Fatalf("codex not marked holding: %+v", a)
+	if !f.holds("codex", got.ID) {
+		t.Fatalf("codex not holding %s: %v", got.ID, f.holding("codex"))
 	}
 	it := f.move("EA-1", TransitionInput{Actor: "codex", Action: ActionSubmit})
 	if it.Status != StatusInReview || it.Implementer != "codex" || it.Branch != "pm/ea-1-half" {
@@ -443,14 +482,18 @@ func TestReassignResumesExpiredWorkUnderNewWorker(t *testing.T) {
 	}
 }
 
-func TestAgentCannotClaimTwoLiveItems(t *testing.T) {
+func TestAgentClaimsUpToItsSlots(t *testing.T) {
 	f := newFixture(t)
 	f.workers()
 	f.project("EA")
 	f.item("EA", "first")
 	f.item("EA", "second")
+	f.slots("claude", 1)
 	f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim})
 	f.refuse("EA-2", TransitionInput{Actor: "claude", Action: ActionClaim}, ErrInvalidTransition)
+	if job, _ := f.s.NextFor(f.ctx, "claude"); job != nil {
+		t.Fatalf("offered past its slots: %+v", job)
+	}
 	f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionRelease})
 	if it := f.move("EA-2", TransitionInput{Actor: "claude", Action: ActionClaim}); it.Assignee != "claude" {
 		t.Fatalf("claim after release: %+v", it)
@@ -646,7 +689,7 @@ func TestMentionsBecomeRespondJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.tick(time.Second)
-	job, err := f.s.CheckIn(f.ctx, "claude", true)
+	job, err := f.s.CheckIn(f.ctx, "claude", true, nil)
 	if err != nil || job == nil || job.Kind != JobRespond || job.Mention == nil || job.Mention.ChatMessage == nil || job.Mention.ChatMessage.ID != msg.ID {
 		t.Fatalf("respond job: %v %+v", err, job)
 	}
@@ -668,12 +711,12 @@ func TestMentionsBecomeRespondJobs(t *testing.T) {
 		t.Fatalf("still open: %+v", open[0])
 	}
 	// Codex was mentioned too and has not spoken: it gets the respond job first.
-	job, _ = f.s.CheckIn(f.ctx, "codex", false)
+	job, _ = f.s.CheckIn(f.ctx, "codex", false, nil)
 	if job == nil || job.Kind != JobRespond {
 		t.Fatalf("codex respond: %+v", job)
 	}
 	// Now claude's next job is the open item.
-	job, _ = f.s.CheckIn(f.ctx, "claude", false)
+	job, _ = f.s.CheckIn(f.ctx, "claude", false, nil)
 	if job == nil || job.Kind != JobImplement {
 		t.Fatalf("after answering: %+v", job)
 	}
@@ -683,7 +726,7 @@ func TestMentionsBecomeRespondJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.tick(time.Second)
-	job, _ = f.s.CheckIn(f.ctx, "claude", false)
+	job, _ = f.s.CheckIn(f.ctx, "claude", false, nil)
 	if job == nil || job.Kind != JobRespond || job.Mention.Comment == nil || job.Mention.Item == nil || len(job.Mention.Thread) != 1 {
 		t.Fatalf("item mention: %+v", job)
 	}
@@ -703,7 +746,7 @@ func TestMentionsBecomeRespondJobs(t *testing.T) {
 	post, _ := f.s.CreatePost(f.ctx, "EA", PostInput{Author: ActorOwner, Title: "q", Body: "@codex?"})
 	f.tick(time.Second)
 	for i := 0; i < MaxMentionAttempts; i++ {
-		job, _ = f.s.CheckIn(f.ctx, "codex", true)
+		job, _ = f.s.CheckIn(f.ctx, "codex", true, nil)
 		if job == nil || job.Kind != JobRespond {
 			t.Fatalf("attempt %d: %+v", i, job)
 		}
@@ -872,21 +915,22 @@ func TestAssignmentIsExclusiveWhenSet(t *testing.T) {
 	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "x", Assignee: "gemini"}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("assignee without a row: %v", err)
 	}
-	// Filed without an assignee, the item is stamped with the default
-	// worker; the stamp is not a hand-off in the feed.
-	def := f.item("EA", "for the default")
-	if def.Assignee != "claude" {
-		t.Fatalf("default stamping: %+v", def)
+	// Filed without an assignee, the item sits unpinned in the top tier's
+	// pool; nothing is a hand-off in the feed.
+	def := f.item("EA", "for the pool")
+	if def.Assignee != "" || def.Tier != DefaultTier {
+		t.Fatalf("pool filing: %+v", def)
 	}
 	if feed, _ := f.s.ItemComments(f.ctx, def.ID); len(feed) != 0 {
-		t.Fatalf("default stamping in the feed: %+v", feed[0])
+		t.Fatalf("pool filing in the feed: %+v", feed[0])
 	}
 	it, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "for codex", Assignee: "codex", Specced: true})
 	if err != nil || it.Assignee != "codex" {
 		t.Fatalf("assigned create: %v %+v", err, it)
 	}
 	f.tick(time.Second)
-	// The other agent is not offered it and cannot claim it.
+	// The pool is the lead's while it is in; a pinned item is nobody
+	// else's.
 	if job, _ := f.s.NextFor(f.ctx, "claude"); job == nil || job.Item.ID != def.ID {
 		t.Fatalf("claude offered the wrong item: %+v", job)
 	}
@@ -895,20 +939,20 @@ func TestAssignmentIsExclusiveWhenSet(t *testing.T) {
 	if job == nil || job.Item.ID != it.ID {
 		t.Fatalf("codex not offered its item: %+v", job)
 	}
-	// Reassigning an open item records the hand-off; it goes to a worker,
-	// never to nobody and never to a name without a row.
+	// Re-pinning an open item records the hand-off; unpinning returns it
+	// to the pool; a name without a row is refused.
 	claude := "claude"
 	got, err := f.s.UpdateItem(f.ctx, "EA-2", ItemPatch{Assignee: &claude}, 0)
 	if err != nil || got.Assignee != "claude" {
 		t.Fatalf("reassign: %v %+v", err, got)
 	}
-	none := ""
-	if _, err := f.s.UpdateItem(f.ctx, "EA-2", ItemPatch{Assignee: &none}, 0); !errors.Is(err, ErrValidation) {
-		t.Fatalf("unassign: %v", err)
-	}
 	gemini := "gemini"
 	if _, err := f.s.UpdateItem(f.ctx, "EA-2", ItemPatch{Assignee: &gemini}, 0); !errors.Is(err, ErrValidation) {
 		t.Fatalf("reassign to no row: %v", err)
+	}
+	none := ""
+	if got, err = f.s.UpdateItem(f.ctx, "EA-2", ItemPatch{Assignee: &none}, 0); err != nil || got.Assignee != "" {
+		t.Fatalf("unpin: %v %+v", err, got)
 	}
 	feed, _ := f.s.ItemComments(f.ctx, it.ID)
 	var assigns []string
@@ -917,11 +961,14 @@ func TestAssignmentIsExclusiveWhenSet(t *testing.T) {
 			assigns = append(assigns, c.Body)
 		}
 	}
-	if len(assigns) != 2 || assigns[0] != "assigned to codex" || assigns[1] != "assigned to claude" {
+	if len(assigns) != 3 || assigns[0] != "assigned to codex" || assigns[1] != "assigned to claude" || assigns[2] != "returned to the tier 10 pool" {
 		t.Fatalf("assign feed: %v", assigns)
 	}
-	// Once claimed and live, the owner cannot swap the holder.
+	// Once claimed and live, the owner cannot swap the holder or unpin.
 	f.move("EA-2", TransitionInput{Actor: "claude", Action: ActionClaim})
+	if _, err := f.s.UpdateItem(f.ctx, "EA-2", ItemPatch{Assignee: &none}, 0); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("unpin in progress: %v", err)
+	}
 	codex := "codex"
 	if _, err := f.s.UpdateItem(f.ctx, "EA-2", ItemPatch{Assignee: &codex}, 0); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("reassign in progress: %v", err)
@@ -933,12 +980,13 @@ func TestAssignmentIsExclusiveWhenSet(t *testing.T) {
 	}
 }
 
-// Workers are rows the owner creates: the first is the default, the default
-// moves and is never cleared, and a row leaves only when nothing depends on it.
+// Workers are rows the owner creates: the first in a tier leads it, the
+// lead moves and is never cleared, and a row leaves only when nothing
+// depends on it.
 func TestWorkersAreOwnerData(t *testing.T) {
 	f := newFixture(t)
-	if def, err := f.s.DefaultAgent(f.ctx); err != nil || def != nil {
-		t.Fatalf("default with no rows: %v %+v", err, def)
+	if top, err := f.s.TopTier(f.ctx); err != nil || top != 0 {
+		t.Fatalf("top tier with no rows: %v %d", err, top)
 	}
 	for _, in := range []AgentInput{
 		{Name: "a", CLI: CLIClaude, Model: "opus"},
@@ -954,45 +1002,87 @@ func TestWorkersAreOwnerData(t *testing.T) {
 		}
 	}
 	opus, err := f.s.CreateAgent(f.ctx, AgentInput{Name: "opus", CLI: CLIClaude, Model: "opus", Effort: EffortMax})
-	if err != nil || !opus.IsDefault || opus.Label != "opus" || !opus.Enabled || opus.CLI != CLIClaude || opus.Model != "opus" || opus.Effort != EffortMax {
+	if err != nil || !opus.Lead || opus.Tier != DefaultTier || opus.Slots != DefaultSlots || opus.Label != "opus" || !opus.Enabled || opus.CLI != CLIClaude || opus.Model != "opus" || opus.Effort != EffortMax {
 		t.Fatalf("first worker: %v %+v", err, opus)
 	}
 	if _, err := f.s.CreateAgent(f.ctx, AgentInput{Name: "opus", CLI: CLICodex, Model: "x"}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate name: %v", err)
 	}
 	fable, err := f.s.CreateAgent(f.ctx, AgentInput{Name: "fable", Label: " Fable XHigh (Claude) ", CLI: CLIClaude, Model: "fable", Effort: EffortXHigh})
-	if err != nil || fable.IsDefault || fable.Label != "Fable XHigh (Claude)" {
+	if err != nil || fable.Lead || fable.Label != "Fable XHigh (Claude)" {
 		t.Fatalf("second worker: %v %+v", err, fable)
 	}
 	if _, err := f.s.CreateAgent(f.ctx, AgentInput{Name: "sol", CLI: CLICodex, Model: "gpt-5.6-sol", Effort: EffortXHigh}); err != nil {
 		t.Fatal(err)
 	}
+	for _, in := range []AgentInput{
+		{Name: "neg", CLI: CLIClaude, Model: "x", Tier: -1},
+		{Name: "neg", CLI: CLIClaude, Model: "x", Slots: -1},
+	} {
+		if _, err := f.s.CreateAgent(f.ctx, in); !errors.Is(err, ErrValidation) {
+			t.Fatalf("%+v: %v", in, err)
+		}
+	}
 	agents, err := f.s.ListAgents(f.ctx)
 	if err != nil || len(agents) != 3 || agents[0].ID != "opus" || agents[1].ID != "fable" || agents[2].ID != "sol" {
-		t.Fatalf("default first, then by name: %v %+v", err, agents)
+		t.Fatalf("lead first, then by name: %v %+v", err, agents)
 	}
 
-	// The default moves; it is never cleared.
+	// The lead moves; it is never cleared.
 	yes, no := true, false
-	if _, err := f.s.UpdateAgent(f.ctx, "opus", AgentPatch{IsDefault: &no}); !errors.Is(err, ErrConflict) {
-		t.Fatalf("clearing the default: %v", err)
+	if _, err := f.s.UpdateAgent(f.ctx, "opus", AgentPatch{Lead: &no}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("clearing the lead: %v", err)
 	}
-	got, err := f.s.UpdateAgent(f.ctx, "fable", AgentPatch{IsDefault: &yes})
-	if err != nil || !got.IsDefault {
-		t.Fatalf("move default: %v %+v", err, got)
+	got, err := f.s.UpdateAgent(f.ctx, "fable", AgentPatch{Lead: &yes})
+	if err != nil || !got.Lead {
+		t.Fatalf("move lead: %v %+v", err, got)
 	}
-	if def, _ := f.s.DefaultAgent(f.ctx); def == nil || def.ID != "fable" {
-		t.Fatalf("default after move: %+v", def)
-	}
-	if opus, _ = f.s.GetAgent(f.ctx, "opus"); opus.IsDefault {
-		t.Fatal("two defaults")
+	if opus, _ = f.s.GetAgent(f.ctx, "opus"); opus.Lead {
+		t.Fatal("two leads")
 	}
 	agents, _ = f.s.ListAgents(f.ctx)
 	if agents[0].ID != "fable" || agents[1].ID != "opus" {
 		t.Fatalf("list after move: %+v", agents)
 	}
-	if got, err = f.s.UpdateAgent(f.ctx, "fable", AgentPatch{IsDefault: &yes}); err != nil || !got.IsDefault {
-		t.Fatalf("default made default again: %v %+v", err, got)
+	if got, err = f.s.SetLead(f.ctx, "fable"); err != nil || !got.Lead {
+		t.Fatalf("lead made lead again: %v %+v", err, got)
+	}
+	// A tier move: the mover leads an empty tier, the tier it left keeps
+	// its lead, and the list runs strongest tier first.
+	eleven := 11
+	if got, err = f.s.UpdateAgent(f.ctx, "sol", AgentPatch{Tier: &eleven}); err != nil || got.Tier != 11 || !got.Lead {
+		t.Fatalf("sol to tier 11: %v %+v", err, got)
+	}
+	if top, _ := f.s.TopTier(f.ctx); top != 11 {
+		t.Fatalf("top tier: %d", top)
+	}
+	agents, _ = f.s.ListAgents(f.ctx)
+	if agents[0].ID != "sol" || agents[1].ID != "fable" || !agents[1].Lead || agents[2].ID != "opus" {
+		t.Fatalf("list by tier: %+v", agents)
+	}
+	// The lead moving into a tier that has one becomes a backup there, and
+	// the tier it left promotes its first worker by name.
+	if got, err = f.s.UpdateAgent(f.ctx, "fable", AgentPatch{Tier: &eleven}); err != nil || got.Lead {
+		t.Fatalf("fable to tier 11: %v %+v", err, got)
+	}
+	if opus, _ = f.s.GetAgent(f.ctx, "opus"); !opus.Lead {
+		t.Fatal("opus not promoted in the tier fable left")
+	}
+	ten, zero := 10, 0
+	if _, err := f.s.UpdateAgent(f.ctx, "fable", AgentPatch{Tier: &zero}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("tier zero: %v", err)
+	}
+	if _, err := f.s.UpdateAgent(f.ctx, "fable", AgentPatch{Slots: &zero}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("slots zero: %v", err)
+	}
+	if got, err = f.s.UpdateAgent(f.ctx, "fable", AgentPatch{Tier: &ten, Lead: &yes}); err != nil || got.Tier != 10 || !got.Lead {
+		t.Fatalf("fable back as lead of 10: %v %+v", err, got)
+	}
+	if opus, _ = f.s.GetAgent(f.ctx, "opus"); opus.Lead {
+		t.Fatal("opus still lead after fable took it")
+	}
+	if _, err := f.s.UpdateAgent(f.ctx, "sol", AgentPatch{Tier: &ten}); err != nil {
+		t.Fatal(err)
 	}
 
 	// Patches: the effort must suit the CLI after the patch; the model
@@ -1022,17 +1112,14 @@ func TestWorkersAreOwnerData(t *testing.T) {
 		t.Fatalf("pause without a row: %v", err)
 	}
 
-	// Deleting: the default, a holder and the assignee of unfinished work
-	// are refused; a missing row is not found.
-	if err := f.s.DeleteAgent(f.ctx, "fable"); !errors.Is(err, ErrConflict) {
-		t.Fatalf("delete the default: %v", err)
-	}
+	// Deleting: a holder and the assignee of unfinished work are refused;
+	// a missing row is not found.
 	if err := f.s.DeleteAgent(f.ctx, "nobody"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("delete without a row: %v", err)
 	}
 	f.project("EA")
-	if it := f.item("EA", "for the default"); it.Assignee != "fable" {
-		t.Fatalf("default stamping after the move: %+v", it)
+	if it := f.item("EA", "for the pool"); it.Assignee != "" || it.Tier != 10 {
+		t.Fatalf("pool filing: %+v", it)
 	}
 	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "for sol", Assignee: "sol"}); err != nil {
 		t.Fatal(err)
@@ -1146,9 +1233,8 @@ func TestReopenRestoresAWorker(t *testing.T) {
 		t.Fatalf("complete: %+v", it)
 	}
 	// A done item reopens under the worker that implemented it, even when
-	// the default is someone else.
-	makeDefault := true
-	if _, err := f.s.UpdateAgent(f.ctx, "codex", AgentPatch{IsDefault: &makeDefault}); err != nil {
+	// the tier's lead is someone else.
+	if _, err := f.s.SetLead(f.ctx, "codex"); err != nil {
 		t.Fatal(err)
 	}
 	it = f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionReopen})

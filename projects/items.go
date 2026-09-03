@@ -19,9 +19,12 @@ type ItemInput struct {
 	Description string
 	Priority    string
 	CreatedBy   string
-	// Assignee hands the item to one worker from the start; "" stamps the
-	// default worker.
+	// Assignee pins the item to one worker from the start; "" leaves it in
+	// its tier's pool. An unavailable worker cannot be pinned.
 	Assignee string
+	// Tier is the pool the item is pulled from; 0 takes the top tier that
+	// has an enabled worker (or the pinned worker's tier).
+	Tier int
 	// Label tags the item for grouping; "" is no label.
 	Label string
 	// After names an item in the same project this one waits on; "" is no
@@ -43,11 +46,14 @@ type ItemPatch struct {
 	Description *string
 	Type        *string
 	Priority    *string
-	// Assignee reassigns an item to another worker, never to nobody. It is
-	// accepted while the item is open, or in progress with an expired lease
-	// (the holder's runner died); any other status refuses it — live work is
-	// not the owner's to swap.
+	// Assignee pins an item to a worker, or with the empty string returns
+	// an open item to its tier's pool. A pin is accepted while the item is
+	// open, or in progress with an expired lease (the holder's runner
+	// died); any other status refuses it — live work is not the owner's to
+	// swap. An unavailable worker cannot be pinned.
 	Assignee *string
+	// Tier moves the item to another tier's pool; it must have a worker.
+	Tier *int
 	// Label retags the item; the empty string clears it.
 	Label *string
 	// After re-points or clears the dependency; the empty string clears it.
@@ -73,9 +79,11 @@ type TransitionInput struct {
 	Branch  string
 	PRURL   string
 	Verdict string
-	// Description and Assignee belong to ActionGroom: the spec the groomer
-	// wrote, and the worker it hands the item to ("" keeps the assignee).
+	// Description, Tier and Assignee belong to ActionGroom: the spec the
+	// groomer wrote, the tier it puts the item in (0 keeps it), and a worker
+	// it pins the item to ("" returns it to the tier's pool).
 	Description string
+	Tier        int
 	Assignee    string
 }
 
@@ -125,27 +133,35 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 	if err != nil {
 		return nil, err
 	}
-	// Every item has a worker: the one named, else the default. Only a
-	// named assignee is a hand-off in the feed; the default is stamped.
+	// The item goes into a tier's pool — the pinned worker's tier, the one
+	// named, else the top tier — and only a pin is a hand-off in the feed.
+	now := s.Now()
+	agents, err := gowild_dbx.All[Agent](ctx, db, gowild_data.QueryOpts{})
+	if err != nil {
+		return nil, err
+	}
+	if len(agents) == 0 {
+		return nil, validationf("there is no worker to take the item; create an agent first")
+	}
 	named := in.Assignee != ""
 	if named {
-		if _, err := s.agentByName(ctx, db, in.Assignee); err != nil {
-			if errors.Is(err, ErrNotFound) {
-				return nil, validationf("assignee %q is not a worker", in.Assignee)
-			}
+		a := agentIn(agents, in.Assignee)
+		if a == nil {
+			return nil, validationf("assignee %q is not a worker", in.Assignee)
+		}
+		if err := pinnable(a, now); err != nil {
 			return nil, err
 		}
-	} else {
-		def, err := s.defaultAgent(ctx, db)
-		if err != nil {
-			return nil, err
+		if in.Tier == 0 {
+			in.Tier = a.TierOrDefault()
 		}
-		if def == nil {
-			return nil, validationf("there is no worker to assign the item to; create an agent first")
-		}
-		in.Assignee = def.ID
 	}
-	now := s.Now()
+	if in.Tier == 0 {
+		in.Tier = topTier(agents)
+	}
+	if in.Tier < 0 || !tierExists(agents, in.Tier) {
+		return nil, validationf("no worker is at tier %d", in.Tier)
+	}
 	number := p.NextNumber
 	if number < 1 {
 		number = 1
@@ -158,7 +174,7 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 	it := &Item{
 		ID: newID(), ProjectID: p.ID, Number: number, Type: in.Type,
 		Title: strings.TrimSpace(in.Title), Description: in.Description, Priority: in.Priority,
-		Status: StatusOpen, Assignee: in.Assignee, Label: label, After: after, Held: in.Held,
+		Status: StatusOpen, Assignee: in.Assignee, Tier: in.Tier, Label: label, After: after, Held: in.Held,
 		// A raw feature or bug is groomed into a spec before it is
 		// implemented; a chore, or a ticket filed as already specced, goes
 		// straight to work.
@@ -347,24 +363,34 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 		it.After = after
 	}
 	now := s.Now()
-	assignTo, assignFrom, assignChanged := "", "", false
+	var agents []*Agent
+	if patch.Assignee != nil || patch.Tier != nil {
+		if agents, err = gowild_dbx.All[Agent](ctx, db, gowild_data.QueryOpts{}); err != nil {
+			return nil, err
+		}
+	}
+	if patch.Tier != nil {
+		if *patch.Tier < 1 || !tierExists(agents, *patch.Tier) {
+			return nil, validationf("no worker is at tier %d", *patch.Tier)
+		}
+		it.Tier = *patch.Tier
+	}
+	assignTo, assignChanged := "", false
 	if patch.Assignee != nil {
 		assignTo = strings.TrimSpace(*patch.Assignee)
-		if assignTo == "" {
-			return nil, validationf("assignee is required; every item has a worker")
-		}
-		if !ValidAgentName(assignTo) {
+		if assignTo != "" && !ValidAgentName(assignTo) {
 			return nil, validationf("assignee %q is not an agent name", assignTo)
 		}
 		if assignTo != it.Assignee {
 			switch {
 			case it.Status == StatusOpen:
+			case assignTo == "":
+				return nil, invalidf("only an open item goes back to the pool; this one is %s", it.Status)
 			case it.Status == StatusInProgress && !leaseLive(it, now):
 				// Nobody is live on it: the holder's runner died (expired
 				// lease), or a review sent it back and the lease is zero.
 				// The item keeps its branch and implementer and resumes
 				// under the new worker from its next check-in.
-				assignFrom = it.Assignee
 				it.ClaimedAt = time.Time{}
 				it.LeaseExpiresAt = time.Time{}
 			case it.Status == StatusInProgress:
@@ -372,11 +398,14 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 			default:
 				return nil, invalidf("only an open item, or an in-progress one whose lease expired, is reassigned; this one is %s", it.Status)
 			}
-			if _, err := s.agentByName(ctx, db, assignTo); err != nil {
-				if errors.Is(err, ErrNotFound) {
+			if assignTo != "" {
+				a := agentIn(agents, assignTo)
+				if a == nil {
 					return nil, validationf("assignee %q is not a worker", assignTo)
 				}
-				return nil, err
+				if err := pinnable(a, now); err != nil {
+					return nil, err
+				}
 			}
 			it.Assignee = assignTo
 			assignChanged = true
@@ -390,11 +419,6 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 	if assignChanged {
 		if err := s.recordAssign(ctx, db, it, ActorOwner, assignTo, now); err != nil {
 			return nil, err
-		}
-		if assignFrom != "" {
-			if err := s.setAgentCurrent(ctx, db, assignFrom, ""); err != nil {
-				return nil, err
-			}
 		}
 	}
 	if patch.Description != nil {
@@ -485,14 +509,29 @@ func (s *Service) afterSettled(ctx context.Context, db gowild_data.Database, it 
 }
 
 // recordAssign puts the hand-off in the feed as a transition that moves no
-// status: "assigned to fable".
+// status: "assigned to fable", or "returned to the tier 11 pool" for an
+// unpin.
 func (s *Service) recordAssign(ctx context.Context, db gowild_data.Database, it *Item, actor, assignee string, now time.Time) error {
+	body := "assigned to " + assignee
+	if assignee == "" {
+		body = fmt.Sprintf("returned to the tier %d pool", it.Tier)
+	}
 	c := &Comment{
 		ID: newID(), TargetKind: TargetItem, TargetID: it.ID, Author: actor,
 		Kind: CommentKindTransition, Action: ActionAssign, FromStatus: it.Status, ToStatus: it.Status,
-		Body: "assigned to " + assignee, CreatedAt: now,
+		Body: body, CreatedAt: now,
 	}
 	return db.Table(Comment{}).Insert(ctx, c)
+}
+
+// pinnable refuses a pin on a worker that is unavailable on quota: the
+// item would wait out the window while its tier-mates could take it.
+func pinnable(a *Agent, now time.Time) error {
+	if av := a.Availability(now); av.State == AvailabilityUnavailable {
+		return validationf("%s is unavailable (%s window %.0f%% used, resets %s); leave the item unpinned or pick another worker",
+			a.ID, av.Window, av.Used, av.Until.Format(time.RFC3339))
+	}
+	return nil
 }
 
 // LeaseExpired reports whether the item's holder is past its lease at now.
@@ -548,8 +587,6 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 	expired := LeaseExpired(it, now)
 	body := strings.TrimSpace(in.Body)
 	verdict := ""
-	// agentHolds / agentClears drive the agents table after the write.
-	holdBy, clearFor := "", ""
 	var to string
 
 	lease := func() {
@@ -568,24 +605,35 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		}
 		// Only a worker the owner created claims; a claim never creates
 		// the row.
-		if _, err := s.agentByName(ctx, db, actor); err != nil {
-			return nil, err
-		}
-		held, err := s.liveLeaseForAgent(ctx, db, actor, now)
+		agents, err := gowild_dbx.All[Agent](ctx, db, gowild_data.QueryOpts{})
 		if err != nil {
 			return nil, err
 		}
-		if held != nil && held.ID != it.ID {
-			return nil, invalidf("%s already holds live work", actor)
+		me := agentIn(agents, actor)
+		if me == nil {
+			return nil, fmt.Errorf("%w: no worker named %s", ErrNotFound, actor)
+		}
+		live, err := s.liveLeasesForAgent(ctx, db, actor, now)
+		if err != nil {
+			return nil, err
+		}
+		if len(live) >= me.SlotsOrDefault() && !holdsLiveLease(it, actor, now) {
+			return nil, invalidf("%s already runs %d jobs", actor, len(live))
 		}
 		// A hold parks the item whatever its status: the owner set it, or
 		// the tracker did after repeated failed runs.
 		if it.Held {
 			return nil, invalidf("held by the owner")
 		}
+		tier := itemTier(it, agents)
 		switch from {
 		case StatusOpen:
-			if it.Assignee != "" && it.Assignee != actor {
+			switch {
+			case it.Assignee == "" && tier != me.TierOrDefault():
+				return nil, invalidf("tier %d work is not tier %d's to take", tier, me.TierOrDefault())
+			case it.Assignee == "" && !mayPull(agents, actor, tier, now):
+				return nil, invalidf("tier %d work goes to the tier's lead while it is in", tier)
+			case it.Assignee != "" && it.Assignee != actor:
 				return nil, invalidf("%s is assigned to %s", from, it.Assignee)
 			}
 			settled, err := s.afterSettled(ctx, db, it)
@@ -598,7 +646,6 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			to = StatusInProgress
 			it.Assignee = actor
 			lease()
-			holdBy = actor
 		case StatusInProgress:
 			if leaseLive(it, now) {
 				return nil, invalidf("held by %s until %s", it.Assignee, it.LeaseExpiresAt.Format(time.RFC3339))
@@ -610,7 +657,6 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			}
 			to = StatusInProgress
 			lease()
-			holdBy = actor
 		case StatusInReview:
 			if actor == it.Implementer {
 				return nil, forbiddenf("%s implemented this and cannot review it", actor)
@@ -618,10 +664,12 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			if leaseLive(it, now) {
 				return nil, invalidf("under review by %s", it.Reviewer)
 			}
+			if !mayReview(agents, actor, it.Implementer, tier, now) {
+				return nil, invalidf("the review of tier %d work goes to the tier's other workers first", tier)
+			}
 			to = StatusInReview
 			it.Reviewer = actor
 			lease()
-			holdBy = actor
 		case StatusApproved:
 			if actor != it.Implementer {
 				return nil, forbiddenf("only the implementer %s finishes an approved item", it.Implementer)
@@ -629,9 +677,18 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			if leaseLive(it, now) {
 				return nil, invalidf("held by %s until %s", actor, it.LeaseExpiresAt.Format(time.RFC3339))
 			}
+			// One merge per project at a time: two never race on main.
+			approved, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{
+				Where: map[string]any{"status": StatusApproved, "project_id": it.ProjectID},
+			})
+			if err != nil {
+				return nil, err
+			}
+			if mergingProjects(approved, now)[it.ProjectID] {
+				return nil, invalidf("another merge in %s is under way; it goes first", p.Key)
+			}
 			to = StatusApproved
 			lease()
-			holdBy = actor
 		default:
 			return nil, invalidf("cannot claim from %s", from)
 		}
@@ -647,7 +704,6 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			// The worker keeps the item: its next check-in retries it.
 			to = StatusOpen
 			clearLease()
-			clearFor = actor
 		case StatusInReview:
 			if it.Reviewer != actor {
 				return nil, forbiddenf("reviewed by %s", it.Reviewer)
@@ -655,14 +711,12 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			to = StatusInReview
 			it.Reviewer = ""
 			clearLease()
-			clearFor = actor
 		case StatusApproved:
 			if it.Implementer != actor {
 				return nil, forbiddenf("belongs to %s", it.Implementer)
 			}
 			to = StatusApproved
 			clearLease()
-			clearFor = actor
 		default:
 			return nil, invalidf("cannot release from %s", from)
 		}
@@ -692,7 +746,6 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		it.Assignee = ""
 		it.Reviewer = ""
 		clearLease()
-		clearFor = actor
 	case ActionReview:
 		if isOwner {
 			return nil, forbiddenf("the owner approves or requests changes, not reviews")
@@ -723,7 +776,6 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		it.Reviewer = actor
 		it.LastVerdict, it.LastVerdictBy, it.LastVerdictAt = verdict, actor, now
 		clearLease()
-		clearFor = actor
 	case ActionGroom:
 		if isOwner {
 			return nil, forbiddenf("the owner edits a ticket directly; groom is the groomer's transition")
@@ -740,15 +792,29 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		if strings.TrimSpace(in.Description) == "" {
 			return nil, validationf("groom needs the spec as the description")
 		}
-		if handTo := strings.TrimSpace(in.Assignee); handTo != "" && handTo != it.Assignee {
-			if _, err := s.agentByName(ctx, db, handTo); err != nil {
-				if errors.Is(err, ErrNotFound) {
-					return nil, validationf("assignee %q is not a worker", handTo)
-				}
+		agents, err := gowild_dbx.All[Agent](ctx, db, gowild_data.QueryOpts{})
+		if err != nil {
+			return nil, err
+		}
+		if in.Tier != 0 {
+			if in.Tier < 0 || !tierExists(agents, in.Tier) {
+				return nil, validationf("no worker is at tier %d", in.Tier)
+			}
+			it.Tier = in.Tier
+		}
+		// The groomed item goes back to its tier's pool unless the groomer
+		// pins it to a worker.
+		handTo := strings.TrimSpace(in.Assignee)
+		if handTo != "" {
+			a := agentIn(agents, handTo)
+			if a == nil {
+				return nil, validationf("assignee %q is not a worker", handTo)
+			}
+			if err := pinnable(a, now); err != nil {
 				return nil, err
 			}
-			it.Assignee = handTo
 		}
+		it.Assignee = handTo
 		// The spec replaces the raw ticket; the raw text survives in the
 		// feed only if the groomer quotes it. Back to open, ready for the
 		// implement job.
@@ -756,7 +822,6 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		it.NeedsGroom = false
 		to = StatusOpen
 		clearLease()
-		clearFor = actor
 	case ActionBlock:
 		if isOwner {
 			return nil, forbiddenf("the owner closes or reopens, not blocks")
@@ -771,10 +836,9 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			return nil, validationf("block needs the question for the owner")
 		}
 		// Blocked, not held: the assignee stays so reopen returns the item
-		// to the same worker, but the lease and the agent's current item go.
+		// to the same worker, but the lease goes.
 		to = StatusBlocked
 		clearLease()
-		clearFor = actor
 	case ActionApprove:
 		if !isOwner {
 			return nil, forbiddenf("only the owner approves")
@@ -813,11 +877,6 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		it.Assignee = ""
 		it.ClosedAt = now
 		clearLease()
-		if !isOwner {
-			clearFor = actor
-		} else if it.Implementer != "" {
-			clearFor = it.Implementer
-		}
 	case ActionReopen:
 		if !isOwner {
 			return nil, forbiddenf("only the owner reopens")
@@ -828,28 +887,19 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		to = StatusOpen
 		if it.Assignee == "" {
 			// A done or closed item lost its holder on the way out: it goes
-			// back to its implementer — if that worker still exists — else
-			// to the default worker. A ghost assignee would park the item
-			// forever: the queue offers by assignee and every claim is
+			// back to its implementer, which has the context — if that
+			// worker still exists and is in — else to its tier's pool. A
+			// ghost assignee would park the item forever: every claim is
 			// refused with its name.
-			it.Assignee = it.Implementer
-			if it.Assignee != "" {
-				if _, err := s.agentByName(ctx, db, it.Assignee); err != nil {
-					if !errors.Is(err, ErrNotFound) {
-						return nil, err
-					}
-					it.Assignee = ""
-				}
+			agents, err := gowild_dbx.All[Agent](ctx, db, gowild_data.QueryOpts{})
+			if err != nil {
+				return nil, err
 			}
-			if it.Assignee == "" {
-				def, err := s.defaultAgent(ctx, db)
-				if err != nil {
-					return nil, err
-				}
-				if def == nil {
-					return nil, validationf("there is no worker to reopen the item for; create an agent first")
-				}
-				it.Assignee = def.ID
+			if a := agentIn(agents, it.Implementer); a != nil && !a.Out(now) {
+				it.Assignee = it.Implementer
+			}
+			if it.Tier == 0 {
+				it.Tier = itemTier(it, agents)
 			}
 		}
 		it.Reviewer = ""
@@ -897,11 +947,6 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		if from == StatusDone || from == StatusClosed {
 			return nil, invalidf("cannot close from %s", from)
 		}
-		if it.Assignee != "" {
-			clearFor = it.Assignee
-		} else if from == StatusInReview && it.Reviewer != "" {
-			clearFor = it.Reviewer
-		}
 		to = StatusClosed
 		it.Assignee = ""
 		it.ClosedAt = now
@@ -936,16 +981,6 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 	}
 	if !isOwner {
 		if err := s.markAnswered(ctx, db, actor, RoomItem, it.ID, now); err != nil {
-			return nil, err
-		}
-	}
-	if clearFor != "" && clearFor != holdBy {
-		if err := s.setAgentCurrent(ctx, db, clearFor, ""); err != nil {
-			return nil, err
-		}
-	}
-	if holdBy != "" {
-		if err := s.setAgentCurrent(ctx, db, holdBy, it.ID); err != nil {
 			return nil, err
 		}
 	}

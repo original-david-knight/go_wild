@@ -191,10 +191,16 @@ type Item struct {
 	Priority    string `json:"priority"`
 	Status      string `json:"status"`
 	// Assignee is the worker holding the item or, while open, the worker it
-	// is assigned to. Every item gets one at creation (the default worker
-	// when none is named); the transitions that hand an item back to the
-	// owner clear it.
+	// is pinned to. An open item with no assignee sits in its tier's pool
+	// and goes to whichever worker of that tier pulls it (tiers.go); once
+	// claimed the item stays with its worker. The transitions that hand an
+	// item back to the owner clear it.
 	Assignee string `json:"assignee"`
+	// Tier is the pool the item is pulled from while unpinned, and the tier
+	// its review is offered to first. Filed without one, an item takes the
+	// top tier that has an enabled worker; zero on an older row reads as
+	// its worker's tier, else the baseline.
+	Tier int `json:"tier"`
 	// Implementer is the agent that submitted the branch; it sticks after
 	// submit so the merge job and the reviewer-must-differ rule can find it.
 	Implementer string `json:"implementer"`
@@ -302,8 +308,12 @@ type ChatMessage struct {
 func (ChatMessage) TableName() string { return "project_chat" }
 
 // Agent is one worker: a model behind a CLI, with a short handle. ID is the
-// handle — the bearer identity, the timer instance and the @mention. Rows
+// handle — the bearer identity, the watcher instance and the @mention. Rows
 // are the owner's data: created through CreateAgent, never by a check-in.
+// The is_default and current_item_id columns of earlier rungs stay in the
+// table (additive-only) but nothing reads them: the lead of the top tier is
+// what "default" used to mean, and what a worker holds is derived from the
+// items' leases.
 type Agent struct {
 	ID string `json:"id"`
 	// Label is what the UI shows; it defaults to the name.
@@ -316,14 +326,37 @@ type Agent struct {
 	// Effort is one of Efforts for either CLI, EffortMax for claude only, or
 	// "" for the CLI's own default.
 	Effort string `json:"effort"`
-	// IsDefault marks the worker an item goes to when it is filed without an
-	// assignee. Exactly one row carries it once any row exists; it moves,
-	// it is never cleared.
-	IsDefault     bool      `json:"is_default"`
-	Enabled       bool      `json:"enabled"`
-	LastSeenAt    time.Time `json:"last_seen_at"`
-	CurrentItemID string    `json:"current_item_id"`
-	CreatedAt     time.Time `json:"created_at"`
+	// Tier is the pool the worker pulls from: unpinned work at a tier goes
+	// to that tier's workers and to nobody else, so a weaker model never
+	// stands in for a stronger one. Higher is stronger. DefaultTier is the
+	// baseline; weaker models sit below it, stronger ones above. Zero reads
+	// as the baseline.
+	Tier int `json:"tier"`
+	// Lead marks the tier's preferred worker: it takes the tier's unpinned
+	// work while it can, and the tier's other workers pull only while it is
+	// out (disabled or unavailable on quota). Every non-empty tier has
+	// exactly one lead: the first worker created in a tier leads it, the
+	// flag moves with SetLead, and a tier whose lead leaves promotes its
+	// first worker by name.
+	Lead bool `json:"lead"`
+	// Slots is how many jobs the worker runs at once; zero reads as
+	// DefaultSlots.
+	Slots      int       `json:"slots"`
+	Enabled    bool      `json:"enabled"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	CreatedAt  time.Time `json:"created_at"`
+	// The worker's last account-usage report, sent by its runner at
+	// check-in (quota.go). Session is the account's five-hour window;
+	// Weekly is the tightest weekly window that applies to this worker's
+	// model, with QuotaWeeklyScope naming it: QuotaScopeAll, or the model
+	// the account scopes it to ("Fable"). Availability derives from these
+	// and the clock; a worker whose runner reports nothing is available.
+	QuotaSessionUsed     float64   `json:"quota_session_used"`
+	QuotaSessionResetsAt time.Time `json:"quota_session_resets_at"`
+	QuotaWeeklyUsed      float64   `json:"quota_weekly_used"`
+	QuotaWeeklyResetsAt  time.Time `json:"quota_weekly_resets_at"`
+	QuotaWeeklyScope     string    `json:"quota_weekly_scope"`
+	QuotaReportedAt      time.Time `json:"quota_reported_at"`
 }
 
 // TableName pins the table name against a later model rename.

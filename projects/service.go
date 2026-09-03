@@ -314,30 +314,37 @@ func (s *Service) Counts(ctx context.Context, projectID string) (map[string]int,
 // ------------------------------------------------------------------ agents
 
 // AgentInput is what creating a worker takes. Label defaults to Name; Model
-// is required; Effort may be "".
+// is required; Effort may be ""; Tier and Slots default to DefaultTier and
+// DefaultSlots. The row leads its tier when the tier has no lead yet.
 type AgentInput struct {
 	Name   string
 	Label  string
 	CLI    string
 	Model  string
 	Effort string
+	Tier   int
+	Slots  int
 }
 
-// AgentPatch is a partial update; nil fields are left alone. IsDefault true
-// moves the default here; false is refused, since the default is moved, not
-// cleared.
+// AgentPatch is a partial update; nil fields are left alone. Lead true
+// makes the row its tier's lead and the tier's old lead a backup; false is
+// refused, since a lead is moved, not cleared. A Tier move takes the flag
+// along only when the new tier has no lead, and the tier left behind
+// promotes its first worker by name.
 type AgentPatch struct {
-	Enabled   *bool
-	Label     *string
-	CLI       *string
-	Model     *string
-	Effort    *string
-	IsDefault *bool
+	Enabled *bool
+	Label   *string
+	CLI     *string
+	Model   *string
+	Effort  *string
+	Tier    *int
+	Slots   *int
+	Lead    *bool
 }
 
-// CreateAgent inserts a worker. The name must be unused. The row becomes
-// the default when no row is the default yet, so the first worker created
-// is the default.
+// CreateAgent inserts a worker. The name must be unused. The row leads its
+// tier when no row there is the lead yet, so the first worker created in a
+// tier leads it.
 func (s *Service) CreateAgent(ctx context.Context, in AgentInput) (*Agent, error) {
 	db, err := s.database()
 	if err != nil {
@@ -362,6 +369,18 @@ func (s *Service) CreateAgent(ctx context.Context, in AgentInput) (*Agent, error
 	if !ValidEffort(in.CLI, in.Effort) {
 		return nil, validationf("effort %q is not low, medium, high, xhigh, max (claude only) or empty", in.Effort)
 	}
+	if in.Tier < 0 {
+		return nil, validationf("tier %d is not a positive number", in.Tier)
+	}
+	if in.Slots < 0 {
+		return nil, validationf("slots %d is not a positive number", in.Slots)
+	}
+	if in.Tier == 0 {
+		in.Tier = DefaultTier
+	}
+	if in.Slots == 0 {
+		in.Slots = DefaultSlots
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	existing, err := gowild_dbx.Get[Agent](ctx, db, in.Name)
@@ -371,18 +390,28 @@ func (s *Service) CreateAgent(ctx context.Context, in AgentInput) (*Agent, error
 	if existing != nil {
 		return nil, fmt.Errorf("%w: agent %s exists", ErrConflict, in.Name)
 	}
-	def, err := s.defaultAgent(ctx, db)
+	rows, err := gowild_dbx.All[Agent](ctx, db, gowild_data.QueryOpts{})
 	if err != nil {
 		return nil, err
 	}
 	a := &Agent{
 		ID: in.Name, Label: in.Label, CLI: in.CLI, Model: in.Model, Effort: in.Effort,
-		IsDefault: def == nil, Enabled: true, CreatedAt: s.Now(),
+		Tier: in.Tier, Slots: in.Slots, Lead: !tierHasLead(rows, in.Tier),
+		Enabled: true, CreatedAt: s.Now(),
 	}
 	if err := db.Table(Agent{}).Insert(ctx, a); err != nil {
 		return nil, err
 	}
 	return a, nil
+}
+
+func tierHasLead(rows []*Agent, tier int) bool {
+	for _, a := range rows {
+		if a.Lead && a.TierOrDefault() == tier {
+			return true
+		}
+	}
+	return false
 }
 
 // GetAgent reads one agent.
@@ -405,30 +434,8 @@ func (s *Service) agentByName(ctx context.Context, db gowild_data.Database, name
 	return a, nil
 }
 
-// DefaultAgent returns the worker that takes items filed without an
-// assignee, or nil when no row is the default (no worker exists yet).
-func (s *Service) DefaultAgent(ctx context.Context) (*Agent, error) {
-	db, err := s.database()
-	if err != nil {
-		return nil, err
-	}
-	return s.defaultAgent(ctx, db)
-}
-
-func (s *Service) defaultAgent(ctx context.Context, db gowild_data.Database) (*Agent, error) {
-	rows, err := gowild_dbx.All[Agent](ctx, db, gowild_data.QueryOpts{})
-	if err != nil {
-		return nil, err
-	}
-	for _, a := range rows {
-		if a.IsDefault {
-			return a, nil
-		}
-	}
-	return nil, nil
-}
-
-// ListAgents returns every agent, the default first, then by name.
+// ListAgents returns every agent: strongest tier first, the lead first
+// within a tier, then by name.
 func (s *Service) ListAgents(ctx context.Context) ([]*Agent, error) {
 	db, err := s.database()
 	if err != nil {
@@ -439,16 +446,22 @@ func (s *Service) ListAgents(ctx context.Context) ([]*Agent, error) {
 		return nil, err
 	}
 	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].IsDefault != rows[j].IsDefault {
-			return rows[i].IsDefault
+		if ti, tj := rows[i].TierOrDefault(), rows[j].TierOrDefault(); ti != tj {
+			return ti > tj
+		}
+		if rows[i].Lead != rows[j].Lead {
+			return rows[i].Lead
 		}
 		return rows[i].ID < rows[j].ID
 	})
 	return rows, nil
 }
 
-// UpdateAgent applies a patch. Moving the default clears every other row's
-// flag in the same transaction.
+// UpdateAgent applies a patch. Making a row the lead demotes the tier's
+// old lead in the same transaction; a tier move re-settles both tiers'
+// leads. A change that can put work in front of a worker — enabling,
+// pausing (its backups step in), a lead or tier or slot change — wakes the
+// parked waits.
 func (s *Service) UpdateAgent(ctx context.Context, name string, patch AgentPatch) (*Agent, error) {
 	db, err := s.database()
 	if err != nil {
@@ -460,8 +473,9 @@ func (s *Service) UpdateAgent(ctx context.Context, name string, patch AgentPatch
 	if err != nil {
 		return nil, err
 	}
-	wasEnabled := a.Enabled
+	rotation := false
 	if patch.Enabled != nil {
+		rotation = rotation || a.Enabled != *patch.Enabled
 		a.Enabled = *patch.Enabled
 	}
 	if patch.Label != nil {
@@ -488,49 +502,88 @@ func (s *Service) UpdateAgent(ctx context.Context, name string, patch AgentPatch
 	if (patch.CLI != nil || patch.Effort != nil) && !ValidEffort(a.CLI, a.Effort) {
 		return nil, validationf("effort %q is not low, medium, high, xhigh, max (claude only) or empty", a.Effort)
 	}
-	moveDefault := false
-	if patch.IsDefault != nil {
-		if !*patch.IsDefault {
-			return nil, fmt.Errorf("%w: the default worker is moved, not cleared; make another worker the default", ErrConflict)
+	if patch.Slots != nil {
+		if *patch.Slots < 1 {
+			return nil, validationf("slots %d is not a positive number", *patch.Slots)
 		}
-		moveDefault = !a.IsDefault
+		rotation = rotation || a.Slots != *patch.Slots
+		a.Slots = *patch.Slots
 	}
-	if !moveDefault {
+	if patch.Lead != nil && !*patch.Lead {
+		return nil, fmt.Errorf("%w: a tier's lead is moved, not cleared; make another worker of the tier the lead", ErrConflict)
+	}
+	moveTier := patch.Tier != nil && *patch.Tier != a.TierOrDefault()
+	if patch.Tier != nil && *patch.Tier < 1 {
+		return nil, validationf("tier %d is not a positive number", *patch.Tier)
+	}
+	makeLead := patch.Lead != nil && (!a.Lead || moveTier)
+	if !moveTier && !makeLead {
 		if err := db.Table(Agent{}).Update(ctx, a); err != nil {
 			return nil, err
 		}
 	} else {
+		rotation = true
 		err = db.RunInTransaction(ctx, func(tx gowild_data.Database) error {
 			rows, err := gowild_dbx.All[Agent](ctx, tx, gowild_data.QueryOpts{})
 			if err != nil {
 				return err
 			}
-			for _, other := range rows {
-				if other.ID == a.ID || !other.IsDefault {
-					continue
-				}
-				other.IsDefault = false
-				if err := tx.Table(Agent{}).Update(ctx, other); err != nil {
-					return err
+			for i, other := range rows {
+				if other.ID == a.ID {
+					rows[i] = a
 				}
 			}
-			a.IsDefault = true
-			return tx.Table(Agent{}).Update(ctx, a)
+			if moveTier {
+				a.Tier = *patch.Tier
+				// The flag follows only into a tier that has no lead; the
+				// tier left behind is re-settled below.
+				a.Lead = a.Lead && !tierHasLead(otherRows(rows, a.ID), a.Tier)
+			}
+			if makeLead {
+				for _, other := range rows {
+					if other.ID != a.ID && other.Lead && other.TierOrDefault() == a.TierOrDefault() {
+						other.Lead = false
+						if err := tx.Table(Agent{}).Update(ctx, other); err != nil {
+							return err
+						}
+					}
+				}
+				a.Lead = true
+			}
+			if err := tx.Table(Agent{}).Update(ctx, a); err != nil {
+				return err
+			}
+			return ensureLeads(ctx, tx, rows)
 		})
 		if err != nil {
 			return nil, err
 		}
 	}
-	// Un-pausing makes the worker's queue live again: its parked wait, if
-	// any, re-checks it.
-	if a.Enabled && !wasEnabled {
+	if rotation {
 		s.wake()
 	}
 	return a, nil
 }
 
-// DeleteAgent removes a worker. It refuses while the row is the default,
-// holds an item, or is the assignee of any item that is not done or closed.
+func otherRows(rows []*Agent, except string) []*Agent {
+	out := make([]*Agent, 0, len(rows))
+	for _, a := range rows {
+		if a.ID != except {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// SetLead makes the worker its tier's lead.
+func (s *Service) SetLead(ctx context.Context, name string) (*Agent, error) {
+	yes := true
+	return s.UpdateAgent(ctx, name, AgentPatch{Lead: &yes})
+}
+
+// DeleteAgent removes a worker. It refuses while the row holds an item or
+// is the assignee of any item that is not done or closed. The tier it
+// leaves re-settles its lead.
 func (s *Service) DeleteAgent(ctx context.Context, name string) error {
 	db, err := s.database()
 	if err != nil {
@@ -542,10 +595,11 @@ func (s *Service) DeleteAgent(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	if a.IsDefault {
-		return fmt.Errorf("%w: %s is the default worker; make another worker the default first", ErrConflict, name)
+	live, err := s.liveLeasesForAgent(ctx, db, name, s.Now())
+	if err != nil {
+		return err
 	}
-	if a.CurrentItemID != "" {
+	if len(live) > 0 {
 		return fmt.Errorf("%w: %s holds an item", ErrConflict, name)
 	}
 	assigned, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{Where: map[string]any{"assignee": name}})
@@ -570,22 +624,24 @@ func (s *Service) DeleteAgent(ctx context.Context, name string) error {
 	if len(implementing) > 0 {
 		return fmt.Errorf("%w: %s is the implementer of an item that is still in flight; let it finish or close it first", ErrConflict, name)
 	}
-	return db.Table(Agent{}).Delete(ctx, name)
+	err = db.RunInTransaction(ctx, func(tx gowild_data.Database) error {
+		if err := tx.Table(Agent{}).Delete(ctx, name); err != nil {
+			return err
+		}
+		rows, err := gowild_dbx.All[Agent](ctx, tx, gowild_data.QueryOpts{})
+		if err != nil {
+			return err
+		}
+		return ensureLeads(ctx, tx, otherRows(rows, a.ID))
+	})
+	if err != nil {
+		return err
+	}
+	s.wake()
+	return nil
 }
 
 // SetAgentEnabled flips the pause switch.
 func (s *Service) SetAgentEnabled(ctx context.Context, name string, enabled bool) (*Agent, error) {
 	return s.UpdateAgent(ctx, name, AgentPatch{Enabled: &enabled})
-}
-
-// setAgentCurrent records what an agent holds; "" clears it. A row that no
-// longer exists (a worker deleted after implementing an item that was still
-// approved) has nothing to record.
-func (s *Service) setAgentCurrent(ctx context.Context, db gowild_data.Database, name, itemID string) error {
-	a, err := gowild_dbx.Get[Agent](ctx, db, name)
-	if err != nil || a == nil {
-		return err
-	}
-	a.CurrentItemID = itemID
-	return db.Table(Agent{}).Update(ctx, a)
 }

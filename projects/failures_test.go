@@ -172,7 +172,7 @@ func TestDeleteAgentRefusedForInFlightImplementer(t *testing.T) {
 }
 
 // Reopening an item whose implementer no longer exists falls back to the
-// default worker instead of assigning a ghost.
+// tier's pool instead of assigning a ghost.
 func TestReopenSkipsGhostImplementer(t *testing.T) {
 	f := newFixture(t)
 	f.agent("codex") // default
@@ -193,7 +193,10 @@ func TestReopenSkipsGhostImplementer(t *testing.T) {
 		t.Fatalf("deleting the implementer of a done item: %v", err)
 	}
 	it := f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionReopen})
-	if it.Assignee != "codex" {
-		t.Fatalf("reopened item assigned to %q, want the default worker", it.Assignee)
+	if it.Assignee != "" || it.Tier != DefaultTier {
+		t.Fatalf("reopened item should sit in the tier %d pool: %+v", DefaultTier, it)
+	}
+	if job, err := f.s.NextFor(f.ctx, "codex"); err != nil || job == nil || job.Item.ID != it.ID {
+		t.Fatalf("reopened item not offered to the tier: %+v %v", job, err)
 	}
 }

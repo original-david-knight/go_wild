@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	gowild_data "github.com/original-david-knight/go_wild/data"
@@ -58,8 +59,12 @@ type candidate struct {
 // CheckIn records the agent as seen and returns its next job, or nil when
 // there is nothing. With claim the item is claimed (or the mention's attempt
 // counted) before it is returned, atomically under the service's mutex. A
-// name with no row is ErrNotFound: a check-in never creates a worker.
-func (s *Service) CheckIn(ctx context.Context, agent string, claim bool) (*Job, error) {
+// name with no row is ErrNotFound: a check-in never creates a worker. A
+// quota report, when the runner sends one, is recorded first and decides
+// the worker's availability: a worker that is disabled, on break or
+// unavailable gets nothing. A report that changes the state wakes the
+// parked waits, since the tier's other workers may now step in or out.
+func (s *Service) CheckIn(ctx context.Context, agent string, claim bool, quota *QuotaReport) (*Job, error) {
 	db, err := s.database()
 	if err != nil {
 		return nil, err
@@ -72,10 +77,17 @@ func (s *Service) CheckIn(ctx context.Context, agent string, claim bool) (*Job, 
 	}
 	now := s.Now()
 	a.LastSeenAt = now
+	before := a.Availability(now).State
+	if quota != nil {
+		applyQuota(a, quota, now)
+	}
 	if err := db.Table(Agent{}).Update(ctx, a); err != nil {
 		return nil, err
 	}
-	if !a.Enabled {
+	if after := a.Availability(now).State; after != before {
+		s.wake()
+	}
+	if !a.Enabled || !a.Availability(now).Available() {
 		return nil, nil
 	}
 	candidates, err := s.candidates(ctx, db, agent, now)
@@ -135,10 +147,13 @@ func (s *Service) NextFor(ctx context.Context, agent string) (*Job, error) {
 
 // Wait parks until the agent's queue holds a job, ctx ends or timeout
 // passes, and reports whether there is one: true means "check in now". It
-// claims nothing and records no check-in. A disabled agent is never ready,
-// whatever its queue holds; a name with no row is ErrNotFound. Every wake
-// re-runs the check, so a wake for another worker's work parks again. A
-// timeout of zero or less checks once. ctx ending is (false, ctx.Err()).
+// claims nothing and records no check-in. A disabled agent, and one on
+// break or unavailable, is never ready, whatever its queue holds; a name
+// with no row is ErrNotFound. Every wake re-runs the check, so a wake for
+// another worker's work parks again. A timeout of zero or less checks once.
+// ctx ending is (false, ctx.Err()). A state that ends on the clock (a
+// quota window resetting) is noticed by the next park, at the latest one
+// timeout later.
 func (s *Service) Wait(ctx context.Context, agent string, timeout time.Duration) (bool, error) {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
@@ -160,8 +175,8 @@ func (s *Service) Wait(ctx context.Context, agent string, timeout time.Duration)
 	}
 }
 
-// ready is Wait's check: the agent exists, is enabled and has a job. It
-// takes no mutex; the writes it races are the ones that wake it.
+// ready is Wait's check: the agent exists, is enabled, available and has a
+// job. It takes no mutex; the writes it races are the ones that wake it.
 func (s *Service) ready(ctx context.Context, agent string) (bool, error) {
 	db, err := s.database()
 	if err != nil {
@@ -171,7 +186,7 @@ func (s *Service) ready(ctx context.Context, agent string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if !a.Enabled {
+	if !a.Enabled || !a.Availability(s.Now()).Available() {
 		return false, nil
 	}
 	job, err := s.NextFor(ctx, agent)
@@ -183,7 +198,9 @@ func (s *Service) ready(ctx context.Context, agent string) (bool, error) {
 
 // candidates is the queue in order. Only active projects count for item
 // work, and only ones with a repository path; mentions count in any active
-// project and in the general room.
+// project and in the general room. A worker with every slot taken gets
+// nothing; a merge is offered only while no other merge in the project is
+// under a live lease, so two approved items never race on one main branch.
 func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent string, now time.Time) ([]candidate, error) {
 	projects, err := gowild_dbx.All[Project](ctx, db, gowild_data.QueryOpts{})
 	if err != nil {
@@ -200,11 +217,19 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 		}
 		return p
 	}
-	held, err := s.liveLeaseForAgent(ctx, db, agent, now)
+	agents, err := gowild_dbx.All[Agent](ctx, db, gowild_data.QueryOpts{})
 	if err != nil {
 		return nil, err
 	}
-	if held != nil {
+	me := agentIn(agents, agent)
+	if me == nil {
+		return nil, nil
+	}
+	live, err := s.liveLeasesForAgent(ctx, db, agent, now)
+	if err != nil {
+		return nil, err
+	}
+	if len(live) >= me.SlotsOrDefault() {
 		return nil, nil
 	}
 	var out []candidate
@@ -225,17 +250,18 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 		out = append(out, candidate{kind: JobRespond, mention: m, project: p})
 	}
 
-	// 1. Approved work of mine to finish.
+	// 1. Approved work of mine to finish, one merge per project at a time.
 	approved, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{
-		Where: map[string]any{"status": StatusApproved, "implementer": agent},
+		Where: map[string]any{"status": StatusApproved},
 	})
 	if err != nil {
 		return nil, err
 	}
+	merging := mergingProjects(approved, now)
 	SortItems(approved)
 	for _, it := range approved {
 		p := workable(it.ProjectID)
-		if p == nil || leaseLive(it, now) || it.Held {
+		if p == nil || it.Implementer != agent || leaseLive(it, now) || it.Held || merging[it.ProjectID] {
 			continue
 		}
 		kind := JobMerge
@@ -245,7 +271,8 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 		out = append(out, candidate{kind: kind, item: it, project: p})
 	}
 
-	// 2. Reviews of the other agent's work.
+	// 2. Reviews of other workers' work: the item's tier first, in pull
+	// order, then the other tiers, strongest first.
 	inReview, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{Where: map[string]any{"status": StatusInReview}})
 	if err != nil {
 		return nil, err
@@ -257,6 +284,9 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 			continue
 		}
 		if it.Reviewer != "" && !LeaseExpired(it, now) {
+			continue
+		}
+		if !mayReview(agents, agent, it.Implementer, itemTier(it, agents), now) {
 			continue
 		}
 		out = append(out, candidate{kind: JobReview, item: it, project: p})
@@ -284,12 +314,25 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 		}
 	}
 
-	// 4. Open work assigned to me.
-	open, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{
+	// 4. Open work: items pinned to me, and my tier's pool while I am the
+	// first of the tier that is in.
+	pinned, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{
 		Where: map[string]any{"status": StatusOpen, "assignee": agent},
 	})
 	if err != nil {
 		return nil, err
+	}
+	pool, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{
+		Where: map[string]any{"status": StatusOpen, "assignee": ""},
+	})
+	if err != nil {
+		return nil, err
+	}
+	open := pinned
+	for _, it := range pool {
+		if tier := itemTier(it, agents); tier == me.TierOrDefault() && mayPull(agents, agent, tier, now) {
+			open = append(open, it)
+		}
 	}
 	SortItems(open)
 	for _, it := range open {
@@ -316,6 +359,18 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 	return out, nil
 }
 
+// mergingProjects is the set of projects with an approved item under a
+// live lease: a merge (or pull request) job in flight.
+func mergingProjects(approved []*Item, now time.Time) map[string]bool {
+	out := map[string]bool{}
+	for _, it := range approved {
+		if leaseLive(it, now) {
+			out[it.ProjectID] = true
+		}
+	}
+	return out
+}
+
 func leaseLive(it *Item, now time.Time) bool {
 	return !it.LeaseExpiresAt.IsZero() && !LeaseExpired(it, now)
 }
@@ -336,19 +391,23 @@ func holdsLiveLease(it *Item, agent string, now time.Time) bool {
 	}
 }
 
-func (s *Service) liveLeaseForAgent(ctx context.Context, db gowild_data.Database, agent string, now time.Time) (*Item, error) {
+// liveLeasesForAgent lists the items the agent holds a live lease on,
+// oldest claim first.
+func (s *Service) liveLeasesForAgent(ctx context.Context, db gowild_data.Database, agent string, now time.Time) ([]*Item, error) {
 	leased, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{
 		WhereIn: map[string][]any{"status": {StatusInProgress, StatusInReview, StatusApproved}},
 	})
 	if err != nil {
 		return nil, err
 	}
+	out := []*Item{}
 	for _, it := range leased {
 		if holdsLiveLease(it, agent, now) {
-			return it, nil
+			out = append(out, it)
 		}
 	}
-	return nil, nil
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ClaimedAt.Before(out[j].ClaimedAt) })
+	return out, nil
 }
 
 func (s *Service) buildJob(ctx context.Context, db gowild_data.Database, c candidate) (*Job, error) {
