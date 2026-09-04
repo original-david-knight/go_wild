@@ -304,13 +304,10 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 	SortItems(inProgress)
 	for _, it := range inProgress {
 		if p := workable(it.ProjectID); p != nil && !leaseLive(it, now) && !it.Held {
-			// A resumed item that was never groomed (its groom job crashed)
-			// resumes as a groom job, not an implement.
-			kind := JobImplement
-			if it.NeedsGroom {
-				kind = JobGroom
-			}
-			out = append(out, candidate{kind: kind, item: it, project: p})
+			// A resumed item picks its kind the way a fresh one does: a
+			// crashed groom resumes as a groom, a code review as a code
+			// review.
+			out = append(out, candidate{kind: jobKindFor(it), item: it, project: p})
 		}
 	}
 
@@ -349,14 +346,23 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 		if !settled {
 			continue
 		}
-		// A raw ticket is groomed into a spec before it is implemented.
-		kind := JobImplement
-		if it.NeedsGroom {
-			kind = JobGroom
-		}
-		out = append(out, candidate{kind: kind, item: it, project: p})
+		out = append(out, candidate{kind: jobKindFor(it), item: it, project: p})
 	}
 	return out, nil
+}
+
+// jobKindFor is the job an open or resumed item is offered as: a raw ticket
+// is groomed into a spec before it is implemented, a code review reviews its
+// pull request, and everything else is implemented.
+func jobKindFor(it *Item) string {
+	switch {
+	case it.NeedsGroom:
+		return JobGroom
+	case it.Type == TypeCodeReview:
+		return JobCodeReview
+	default:
+		return JobImplement
+	}
 }
 
 // mergingProjects is the set of projects with an approved item under a

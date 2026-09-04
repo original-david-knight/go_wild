@@ -35,7 +35,8 @@ const MaxItemFailures = 3
 type Run struct {
 	ID    string `json:"id"`
 	Agent string `json:"agent"`
-	// Kind is the job kind: respond, implement, review, merge, pull_request.
+	// Kind is the job kind: respond, implement, review, merge, pull_request,
+	// groom, code_review.
 	Kind string `json:"kind"`
 	// ItemID or MentionID names the job's subject; ProjectID is "" for the
 	// general room.
@@ -114,7 +115,7 @@ func (s *Service) StartRun(ctx context.Context, in RunInput) (*Run, error) {
 		return nil, validationf("run agent %q is not an agent name", in.Agent)
 	}
 	switch in.Kind {
-	case JobRespond, JobImplement, JobReview, JobMerge, JobPullRequest, JobGroom:
+	case JobRespond, JobImplement, JobReview, JobMerge, JobPullRequest, JobGroom, JobCodeReview:
 	default:
 		return nil, validationf("run kind %q is unknown", in.Kind)
 	}

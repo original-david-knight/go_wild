@@ -38,10 +38,15 @@ const (
 	TypeFeature = "feature"
 	TypeBug     = "bug"
 	TypeChore   = "chore"
+	// TypeCodeReview is a review of somebody else's pull request: the item
+	// carries the PR's URL, a worker reviews the PR head and hands the
+	// review back as its submit, and the owner's approve closes it. It is
+	// never groomed and never merged.
+	TypeCodeReview = "code_review"
 )
 
 // Types lists every item type.
-var Types = []string{TypeFeature, TypeBug, TypeChore}
+var Types = []string{TypeFeature, TypeBug, TypeChore, TypeCodeReview}
 
 // Item priorities, lowest first.
 const (
@@ -119,10 +124,12 @@ const (
 // Efforts lists the effort levels either CLI accepts, lowest first.
 var Efforts = []string{EffortLow, EffortMedium, EffortHigh, EffortXHigh}
 
-// Review verdicts.
+// Review verdicts. The review action takes the first two; a code_review
+// item's submit may carry any of the three as the suggested verdict.
 const (
 	VerdictApprove        = "approve"
 	VerdictRequestChanges = "request_changes"
+	VerdictComment        = "comment"
 )
 
 // Comment kinds and targets.
@@ -145,6 +152,9 @@ const (
 	// assignee reads the code, rewrites the description, splits the work
 	// into after-chained items when it is really several, and assigns.
 	JobGroom = "groom"
+	// JobCodeReview is a code_review item's job: the assignee checks out the
+	// pull request the item names, reviews it and submits the review.
+	JobCodeReview = "code_review"
 )
 
 // Mention rooms — where an @mention was made and where its answer belongs.
@@ -179,7 +189,7 @@ type Project struct {
 // TableName pins the table name against a later model rename.
 func (Project) TableName() string { return "project_projects" }
 
-// Item is one unit of work: a feature, a bug or a chore.
+// Item is one unit of work: a feature, a bug, a chore or a code review.
 type Item struct {
 	ID        string `json:"id"`
 	ProjectID string `json:"project_id"`
@@ -211,9 +221,14 @@ type Item struct {
 	ClaimedAt      time.Time `json:"claimed_at"`
 	LeaseExpiresAt time.Time `json:"lease_expires_at"`
 	Branch         string    `json:"branch"`
-	PRURL          string    `json:"pr_url"`
+	// PRURL is the pull request: the one a complete reports, or, on a
+	// code_review item, the one under review — required there, and
+	// validated as a GitHub pull request URL when an item is filed or
+	// edited. A submit or complete writes the URL it carries as given.
+	PRURL string `json:"pr_url"`
 	// LastVerdict* record the latest review so a list can show "changes
-	// requested" without reading the feed.
+	// requested" without reading the feed. On a code_review item the
+	// submit records the reviewer's suggested verdict here.
 	LastVerdict   string    `json:"last_verdict"`
 	LastVerdictBy string    `json:"last_verdict_by"`
 	LastVerdictAt time.Time `json:"last_verdict_at"`
@@ -256,7 +271,7 @@ type Comment struct {
 	TargetID   string `json:"target_id"`
 	Author     string `json:"author"`
 	// Kind is comment or transition; a transition carries the action, the
-	// two statuses and, for reviews, the verdict.
+	// two statuses and, for a review or a code review's submit, the verdict.
 	Kind       string `json:"kind"`
 	Action     string `json:"action"`
 	FromStatus string `json:"from_status"`

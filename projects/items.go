@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -35,8 +36,12 @@ type ItemInput struct {
 	Held bool
 	// Specced says the description is already a spec: no groom job. A raw
 	// feature or bug filed without it is groomed before it is implemented;
-	// chores are never groomed.
+	// chores and code reviews are never groomed.
 	Specced bool
+	// PRURL is the pull request a code_review item reviews — required for
+	// that type, optional on the others, and a GitHub pull request URL
+	// whenever it is set.
+	PRURL string
 }
 
 // ItemPatch is a partial edit of the descriptive fields; nil leaves a field
@@ -58,6 +63,9 @@ type ItemPatch struct {
 	Label *string
 	// After re-points or clears the dependency; the empty string clears it.
 	After *string
+	// PRURL re-points the pull request; the empty string clears it, except
+	// on a code_review item, which always needs one.
+	PRURL *string
 }
 
 // ItemFilter narrows a listing. With no Statuses, done and closed items are
@@ -98,7 +106,14 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 		in.Type = TypeFeature
 	}
 	if !validType(in.Type) {
-		return nil, validationf("item type %q is not feature, bug or chore", in.Type)
+		return nil, validationf("item type %q is not feature, bug, chore or code_review", in.Type)
+	}
+	prURL, err := cleanPRURL(in.PRURL)
+	if err != nil {
+		return nil, err
+	}
+	if in.Type == TypeCodeReview && prURL == "" {
+		return nil, validationf("a code_review item needs pr_url")
 	}
 	if in.Priority == "" {
 		in.Priority = PriorityNormal
@@ -175,10 +190,11 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 		ID: newID(), ProjectID: p.ID, Number: number, Type: in.Type,
 		Title: strings.TrimSpace(in.Title), Description: in.Description, Priority: in.Priority,
 		Status: StatusOpen, Assignee: in.Assignee, Tier: in.Tier, Label: label, After: after, Held: in.Held,
+		PRURL: prURL,
 		// A raw feature or bug is groomed into a spec before it is
-		// implemented; a chore, or a ticket filed as already specced, goes
-		// straight to work.
-		NeedsGroom: !in.Specced && in.Type != TypeChore,
+		// implemented; a chore, a code review, or a ticket filed as already
+		// specced, goes straight to work.
+		NeedsGroom: !in.Specced && in.Type != TypeChore && in.Type != TypeCodeReview,
 		CreatedBy:  in.CreatedBy, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := db.Table(Item{}).Insert(ctx, it); err != nil {
@@ -326,9 +342,21 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 	}
 	if patch.Type != nil {
 		if !validType(*patch.Type) {
-			return nil, validationf("item type %q is not feature, bug or chore", *patch.Type)
+			return nil, validationf("item type %q is not feature, bug, chore or code_review", *patch.Type)
 		}
 		it.Type = *patch.Type
+	}
+	if patch.PRURL != nil {
+		prURL, err := cleanPRURL(*patch.PRURL)
+		if err != nil {
+			return nil, err
+		}
+		it.PRURL = prURL
+	}
+	// A code review is nothing without its pull request: neither a retype
+	// onto an item that has none nor a patch that strips it goes through.
+	if it.Type == TypeCodeReview && it.PRURL == "" {
+		return nil, validationf("a code_review item needs pr_url")
 	}
 	if patch.Priority != nil {
 		if !validPriority(*patch.Priority) {
@@ -433,6 +461,23 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 		s.wake()
 	}
 	return it, nil
+}
+
+// prURLPattern is the one shape a pull request URL takes: a GitHub pull
+// request, with or without a trailing slash.
+var prURLPattern = regexp.MustCompile(`^https://github\.com/[^/\s]+/[^/\s]+/pull/[0-9]+/?$`)
+
+// cleanPRURL trims a pull request URL and drops its trailing slash; "" is
+// none, and anything that is not a GitHub pull request URL is refused.
+func cleanPRURL(raw string) (string, error) {
+	u := strings.TrimSpace(raw)
+	if u == "" {
+		return "", nil
+	}
+	if !prURLPattern.MatchString(u) {
+		return "", validationf("pr_url %q is not a GitHub pull request URL", u)
+	}
+	return strings.TrimSuffix(u, "/"), nil
 }
 
 // cleanLabel trims a label and refuses one that cannot sit in a table row:
@@ -730,6 +775,30 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		if it.Assignee != actor {
 			return nil, forbiddenf("held by %s", it.Assignee)
 		}
+		if it.Type == TypeCodeReview {
+			// A code review's submit is the review itself: no branch, the
+			// review as the body, and the reviewer's suggested verdict, if
+			// any, recorded on the item and the comment. It goes straight to
+			// the owner; the pull request stays the item's input, so neither
+			// the branch nor a pr_url on the submit is read.
+			if body == "" {
+				return nil, validationf("submit needs the review as its body")
+			}
+			switch verdict = strings.TrimSpace(in.Verdict); verdict {
+			case "", VerdictApprove, VerdictRequestChanges, VerdictComment:
+			default:
+				return nil, validationf("verdict %q is not approve, request_changes or comment", in.Verdict)
+			}
+			to = StatusPendingApproval
+			it.Implementer = actor
+			it.Assignee = ""
+			it.Reviewer = ""
+			if verdict != "" {
+				it.LastVerdict, it.LastVerdictBy, it.LastVerdictAt = verdict, actor, now
+			}
+			clearLease()
+			break
+		}
 		branch := strings.TrimSpace(in.Branch)
 		if branch == "" {
 			branch = it.Branch
@@ -847,6 +916,12 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			return nil, invalidf("cannot approve from %s", from)
 		}
 		to = StatusApproved
+		if it.Type == TypeCodeReview {
+			// Nothing to merge: the owner's approve is the end of a code
+			// review.
+			to = StatusDone
+			it.ClosedAt = now
+		}
 		it.Assignee = ""
 		clearLease()
 	case ActionRequestChanges:
@@ -864,6 +939,9 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		it.LastVerdict, it.LastVerdictBy, it.LastVerdictAt = VerdictRequestChanges, actor, now
 		clearLease()
 	case ActionComplete:
+		if it.Type == TypeCodeReview {
+			return nil, invalidf("a code review completes through approve")
+		}
 		if !isOwner && actor != it.Implementer {
 			return nil, forbiddenf("only the implementer %s or the owner completes", it.Implementer)
 		}
