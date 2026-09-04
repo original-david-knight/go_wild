@@ -31,8 +31,8 @@ func TestAfterGateBlocksUntilSettled(t *testing.T) {
 		t.Fatalf("gated item offered: %+v", job)
 	}
 	f.refuse("EA-2", TransitionInput{Actor: "claude", Action: ActionClaim}, ErrInvalidTransition)
-	// Closing the dependency settles it as well as completing it would.
-	f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionClose})
+	// Cancelling the dependency settles it as well as completing it would.
+	f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionCancel})
 	job, err := f.s.NextFor(f.ctx, "claude")
 	if err != nil || job == nil || job.Kind != JobImplement || job.Item.ID != second.ID {
 		t.Fatalf("settled dependency not offered: %v %+v", err, job)
@@ -151,14 +151,14 @@ func TestHold(t *testing.T) {
 	f.refuse("EA-1", TransitionInput{Actor: "claude", Action: ActionHold}, ErrForbidden)
 }
 
-func TestHoldSurvivesCloseAndReopen(t *testing.T) {
+func TestHoldSurvivesCancelAndReopen(t *testing.T) {
 	f := newFixture(t)
 	f.workers()
 	f.project("EA")
 	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "parked", Held: true}); err != nil {
 		t.Fatal(err)
 	}
-	f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionClose})
+	f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionCancel})
 	f.refuse("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionUnhold}, ErrInvalidTransition)
 	it := f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionReopen})
 	if !it.Held || it.Status != StatusOpen {
@@ -228,7 +228,7 @@ func TestWaitWakesWhenADependencySettles(t *testing.T) {
 	}
 	ch := f.wait(f.ctx, "codex", time.Minute)
 	time.Sleep(parked)
-	f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionClose})
+	f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionCancel})
 	if r := f.settle(ch); r.err != nil || !r.ready {
 		t.Fatalf("wait after settle: %+v", r)
 	}

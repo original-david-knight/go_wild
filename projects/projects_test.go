@@ -219,13 +219,17 @@ func TestHappyPathMergePolicy(t *testing.T) {
 	}
 	f.refuse("EA-1", TransitionInput{Actor: "codex", Action: ActionComplete}, ErrForbidden)
 	f.refuse("EA-1", TransitionInput{Actor: "codex", Action: ActionClaim}, ErrForbidden)
+	// Approved is the one state the owner cannot cancel from: the merge is
+	// in flight. Close is not for it either.
+	f.refuse("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionCancel}, ErrInvalidTransition)
+	f.refuse("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionClose}, ErrInvalidTransition)
 	f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim})
 	f.refuse("EA-1", TransitionInput{Actor: "claude", Action: ActionClaim}, ErrInvalidTransition)
 	it = f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionComplete, Body: "merged"})
 	if it.Status != StatusDone || it.ClosedAt.IsZero() {
 		t.Fatalf("complete: %+v", it)
 	}
-	f.refuse("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionClose}, ErrInvalidTransition)
+	f.refuse("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionCancel}, ErrInvalidTransition)
 
 	feed, err := f.s.ItemComments(f.ctx, it.ID)
 	if err != nil {
@@ -256,6 +260,23 @@ func TestHappyPathMergePolicy(t *testing.T) {
 			t.Fatalf("%s still holds %v", a.ID, held)
 		}
 	}
+
+	// Close archives a done item — the sweep that clears a finished batch —
+	// keeping the stamp of its completion; closed is the end of the line;
+	// reopen hands the item back to its implementer.
+	finished := it.ClosedAt
+	f.tick(time.Hour)
+	f.refuse("EA-1", TransitionInput{Actor: "claude", Action: ActionClose}, ErrForbidden)
+	it = f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionClose})
+	if it.Status != StatusClosed || !it.ClosedAt.Equal(finished) || it.Assignee != "" {
+		t.Fatalf("close from done: %+v", it)
+	}
+	f.refuse("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionClose}, ErrInvalidTransition)
+	f.refuse("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionCancel}, ErrInvalidTransition)
+	it = f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionReopen})
+	if it.Status != StatusOpen || it.Assignee != "claude" || !it.ClosedAt.IsZero() {
+		t.Fatalf("reopen from closed: %+v", it)
+	}
 }
 
 func TestOwnerPaths(t *testing.T) {
@@ -275,15 +296,20 @@ func TestOwnerPaths(t *testing.T) {
 	if it.Status != StatusOpen || it.Assignee != "claude" {
 		t.Fatalf("reopen: %+v", it)
 	}
-	it = f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionClose})
-	if it.Status != StatusClosed || it.ClosedAt.IsZero() || it.Assignee != "" {
-		t.Fatalf("close: %+v", it)
+	// Close is for done items; an open one is cancelled instead.
+	f.refuse("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionClose}, ErrInvalidTransition)
+	f.refuse("EA-1", TransitionInput{Actor: "claude", Action: ActionCancel}, ErrForbidden)
+	it = f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionCancel})
+	if it.Status != StatusCancelled || it.ClosedAt.IsZero() || it.Assignee != "" {
+		t.Fatalf("cancel: %+v", it)
 	}
-	// Closed before anyone implemented it: reopen puts it back in its
+	f.refuse("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionCancel}, ErrInvalidTransition)
+	f.refuse("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionClose}, ErrInvalidTransition)
+	// Cancelled before anyone implemented it: reopen puts it back in its
 	// tier's pool.
 	it = f.move("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionReopen})
 	if it.Status != StatusOpen || !it.ClosedAt.IsZero() || it.Assignee != "" || it.Tier != DefaultTier {
-		t.Fatalf("reopen from closed: %+v", it)
+		t.Fatalf("reopen from cancelled: %+v", it)
 	}
 	// Owner request_changes from pending approval goes back to the implementer.
 	toCodex := "codex"
@@ -543,16 +569,16 @@ func TestListItemsFilters(t *testing.T) {
 	f.project("EA")
 	f.item("EA", "a")
 	f.item("EA", "b")
-	f.move("EA-2", TransitionInput{Actor: ActorOwner, Action: ActionClose})
+	f.move("EA-2", TransitionInput{Actor: ActorOwner, Action: ActionCancel})
 	rows, err := f.s.ListItems(f.ctx, ItemFilter{ProjectKey: "EA"})
 	if err != nil || len(rows) != 1 || rows[0].Number != 1 {
-		t.Fatalf("default hides closed: %v %d", err, len(rows))
+		t.Fatalf("default hides cancelled: %v %d", err, len(rows))
 	}
 	rows, _ = f.s.ListItems(f.ctx, ItemFilter{ProjectKey: "EA", IncludeClosed: true})
 	if len(rows) != 2 {
 		t.Fatalf("include closed: %d", len(rows))
 	}
-	rows, _ = f.s.ListItems(f.ctx, ItemFilter{Statuses: []string{StatusClosed}})
+	rows, _ = f.s.ListItems(f.ctx, ItemFilter{Statuses: []string{StatusCancelled}})
 	if len(rows) != 1 || rows[0].Number != 2 {
 		t.Fatalf("by status: %d", len(rows))
 	}
@@ -1162,9 +1188,9 @@ func TestWorkersAreOwnerData(t *testing.T) {
 	if err := f.s.DeleteAgent(f.ctx, "opus"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("delete a holder: %v", err)
 	}
-	f.move("EA-2", TransitionInput{Actor: ActorOwner, Action: ActionClose})
+	f.move("EA-2", TransitionInput{Actor: ActorOwner, Action: ActionCancel})
 	if err := f.s.DeleteAgent(f.ctx, "sol"); err != nil {
-		t.Fatalf("delete once its item is closed: %v", err)
+		t.Fatalf("delete once its item is cancelled: %v", err)
 	}
 	if _, err := f.s.GetAgent(f.ctx, "sol"); !errors.Is(err, ErrNotFound) {
 		t.Fatal("deleted row still read")

@@ -613,8 +613,8 @@ func (s *Service) DeleteAgent(ctx context.Context, name string) error {
 		return err
 	}
 	for _, it := range assigned {
-		if it.Status != StatusDone && it.Status != StatusClosed {
-			return fmt.Errorf("%w: %s is the assignee of an item that is not done or closed; reassign it first", ErrConflict, name)
+		if !Ended(it.Status) {
+			return fmt.Errorf("%w: %s is the assignee of an item that is still on the board; reassign it first", ErrConflict, name)
 		}
 	}
 	// In-flight items past submit have no assignee, but their merge job
@@ -628,7 +628,7 @@ func (s *Service) DeleteAgent(ctx context.Context, name string) error {
 		return err
 	}
 	if len(implementing) > 0 {
-		return fmt.Errorf("%w: %s is the implementer of an item that is still in flight; let it finish or close it first", ErrConflict, name)
+		return fmt.Errorf("%w: %s is the implementer of an item that is still in flight; let it finish or cancel it first", ErrConflict, name)
 	}
 	err = db.RunInTransaction(ctx, func(tx gowild_data.Database) error {
 		if err := tx.Table(Agent{}).Delete(ctx, name); err != nil {

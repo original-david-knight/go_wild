@@ -291,7 +291,7 @@ func (s *Service) ListItems(ctx context.Context, f ItemFilter) ([]*Item, error) 
 	if len(f.Statuses) == 0 && !f.IncludeClosed {
 		kept := rows[:0]
 		for _, it := range rows {
-			if it.Status != StatusDone && it.Status != StatusClosed {
+			if !Ended(it.Status) {
 				kept = append(kept, it)
 			}
 		}
@@ -537,8 +537,8 @@ func (s *Service) afterChainLoops(ctx context.Context, db gowild_data.Database, 
 }
 
 // afterSettled reports whether the item's dependency is settled: no after,
-// or the item it names is done or closed either way. An after whose item is
-// gone blocks nothing.
+// or the item it names has ended — done, closed or cancelled. An after whose
+// item is gone blocks nothing.
 func (s *Service) afterSettled(ctx context.Context, db gowild_data.Database, it *Item) (bool, error) {
 	if it.After == "" {
 		return true, nil
@@ -550,7 +550,7 @@ func (s *Service) afterSettled(ctx context.Context, db gowild_data.Database, it 
 		}
 		return false, err
 	}
-	return target.Status == StatusDone || target.Status == StatusClosed, nil
+	return Ended(target.Status), nil
 }
 
 // recordAssign puts the hand-off in the feed as a transition that moves no
@@ -959,12 +959,12 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		if !isOwner {
 			return nil, forbiddenf("only the owner reopens")
 		}
-		if from != StatusBlocked && from != StatusDone && from != StatusClosed {
+		if from != StatusBlocked && !Ended(from) {
 			return nil, invalidf("cannot reopen from %s", from)
 		}
 		to = StatusOpen
 		if it.Assignee == "" {
-			// A done or closed item lost its holder on the way out: it goes
+			// An ended item lost its holder on the way out: it goes
 			// back to its implementer, which has the context — if that
 			// worker still exists and is in — else to its tier's pool. A
 			// ghost assignee would park the item forever: every claim is
@@ -1005,9 +1005,9 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		if !isOwner {
 			return nil, forbiddenf("only the owner lifts a hold")
 		}
-		// A held item that was closed keeps its hold; reopen brings it back
-		// still parked, and the unhold happens there.
-		if from == StatusDone || from == StatusClosed {
+		// A held item that was cancelled keeps its hold; reopen brings it
+		// back still parked, and the unhold happens there.
+		if Ended(from) {
 			return nil, invalidf("cannot unhold from %s", from)
 		}
 		if !it.Held {
@@ -1018,16 +1018,35 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		// on a clean slate; lifting it means the owner dealt with the cause.
 		it.Failures = 0
 		to = from
+	case ActionCancel:
+		if !isOwner {
+			return nil, forbiddenf("only the owner cancels")
+		}
+		// Anything still to be worked, reviewed or judged can be taken off
+		// the board. An approved item is being merged: the ticket must not
+		// say otherwise while the code lands — once it has, complete it by
+		// hand if the runner did not.
+		switch {
+		case from == StatusApproved:
+			return nil, invalidf("cannot cancel while approved: the merge is in flight")
+		case Ended(from):
+			return nil, invalidf("cannot cancel from %s", from)
+		}
+		to = StatusCancelled
+		it.Assignee = ""
+		it.ClosedAt = now
+		clearLease()
 	case ActionClose:
 		if !isOwner {
 			return nil, forbiddenf("only the owner closes")
 		}
-		if from == StatusDone || from == StatusClosed {
-			return nil, invalidf("cannot close from %s", from)
+		// Close is the archive step after done — the sweep that clears a
+		// finished batch off the board. The stamp of the completion stays,
+		// so the recently-finished order survives the sweep.
+		if from != StatusDone {
+			return nil, invalidf("cannot close from %s: close archives a done item; cancel takes an unfinished one off the board", from)
 		}
 		to = StatusClosed
-		it.Assignee = ""
-		it.ClosedAt = now
 		clearLease()
 	default:
 		return nil, validationf("action %q is unknown", in.Action)

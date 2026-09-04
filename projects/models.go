@@ -25,12 +25,19 @@ const (
 	StatusDone            = "done"
 	StatusBlocked         = "blocked"
 	StatusClosed          = "closed"
+	StatusCancelled       = "cancelled"
 )
 
 // Statuses lists every item status in board order.
 var Statuses = []string{
 	StatusOpen, StatusInProgress, StatusInReview, StatusPendingApproval,
-	StatusApproved, StatusBlocked, StatusDone, StatusClosed,
+	StatusApproved, StatusBlocked, StatusDone, StatusClosed, StatusCancelled,
+}
+
+// Ended reports whether a status is off the board: done (merged), closed
+// (done, then archived) or cancelled (abandoned before it was done).
+func Ended(status string) bool {
+	return status == StatusDone || status == StatusClosed || status == StatusCancelled
 }
 
 // Item types.
@@ -89,6 +96,7 @@ const (
 	ActionComplete       = "complete"
 	ActionReopen         = "reopen"
 	ActionClose          = "close"
+	ActionCancel         = "cancel"
 	// ActionAssign is the owner handing an item to another worker; the
 	// status does not move.
 	ActionAssign = "assign"

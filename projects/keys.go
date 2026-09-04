@@ -103,7 +103,7 @@ func PriorityRank(p string) int {
 func StatusOrder(status string) int {
 	for i, s := range []string{
 		StatusPendingApproval, StatusBlocked, StatusApproved, StatusInReview,
-		StatusInProgress, StatusOpen, StatusDone, StatusClosed,
+		StatusInProgress, StatusOpen, StatusDone, StatusClosed, StatusCancelled,
 	} {
 		if s == status {
 			return i
