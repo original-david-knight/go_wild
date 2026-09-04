@@ -20,6 +20,10 @@ type DBFunc func() gowild_data.Database
 // the fact, so every caller's unavailable response is produced one way.
 var ErrUnavailable = errors.New("database unavailable")
 
+// ErrAtomicUnsupported refuses a conditional write through a table that does
+// not implement it. A read-then-write fallback would silently lose atomicity.
+var ErrAtomicUnsupported = errors.New("table does not support atomic writes")
+
 // Table resolves a model's DAO, or nil with the database down.
 func Table[T any](db gowild_data.Database) gowild_data.TableDAO {
 	if db == nil {
@@ -82,26 +86,44 @@ func Upsert[T any](ctx context.Context, db gowild_data.Database, id string, row 
 	return dao.Insert(ctx, row)
 }
 
-// InsertNew writes row only when id is absent, reporting whether it did —
-// the idempotent tombstone/dedupe shape.
+// InsertNew atomically inserts row only when its primary key is absent. id
+// must be row's primary key; it remains in the signature for existing callers.
 func InsertNew[T any](ctx context.Context, db gowild_data.Database, id string, row *T) (bool, error) {
-	dao := Table[T](db)
-	if dao == nil {
-		return false, ErrUnavailable
-	}
-	existing, err := dao.Query(ctx, gowild_data.QueryOpts{
-		Where: map[string]any{"id": id}, Limit: 1,
-	})
+	dao, err := atomicTable[T](db)
 	if err != nil {
 		return false, err
 	}
-	if len(existing) > 0 {
-		return false, nil
-	}
-	if err := dao.Insert(ctx, row); err != nil {
+	return dao.InsertIfAbsent(ctx, row)
+}
+
+// UpdateIf writes row only when its stored columns match expected.
+func UpdateIf[T any](ctx context.Context, db gowild_data.Database, row *T, expected map[string]any) (bool, error) {
+	dao, err := atomicTable[T](db)
+	if err != nil {
 		return false, err
 	}
-	return true, nil
+	return dao.UpdateIf(ctx, row, expected)
+}
+
+// DeleteIf deletes id only when its stored columns match expected.
+func DeleteIf[T any](ctx context.Context, db gowild_data.Database, id string, expected map[string]any) (bool, error) {
+	dao, err := atomicTable[T](db)
+	if err != nil {
+		return false, err
+	}
+	return dao.DeleteIf(ctx, id, expected)
+}
+
+func atomicTable[T any](db gowild_data.Database) (gowild_data.AtomicTableDAO, error) {
+	dao := Table[T](db)
+	if dao == nil {
+		return nil, ErrUnavailable
+	}
+	atomic, ok := dao.(gowild_data.AtomicTableDAO)
+	if !ok {
+		return nil, ErrAtomicUnsupported
+	}
+	return atomic, nil
 }
 
 // ReplaceSet reconciles the rows matching filter to exactly want: present

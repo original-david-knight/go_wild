@@ -3,6 +3,8 @@ package dbx
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	gowild_data "github.com/original-david-knight/go_wild/data"
@@ -153,5 +155,79 @@ func TestErrUnavailableWhenDBFuncNil(t *testing.T) {
 	var down DBFunc = func() gowild_data.Database { return nil }
 	if _, err := All[thing](ctx, down(), gowild_data.QueryOpts{}); !errors.Is(err, ErrUnavailable) {
 		t.Errorf("All(down DBFunc) = %v, want ErrUnavailable", err)
+	}
+}
+
+func TestAtomicHelpersAndConcurrentInsert(t *testing.T) {
+	db := memDB(t)
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	var winners atomic.Int32
+	gate := make(chan struct{})
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-gate
+			inserted, err := InsertNew(ctx, db, "one", &thing{ID: "one", Name: "first"})
+			if inserted {
+				winners.Add(1)
+			}
+			errs <- err
+		}()
+	}
+	close(gate)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if winners.Load() != 1 {
+		t.Fatalf("%d insert winners", winners.Load())
+	}
+	if ok, err := UpdateIf(ctx, db, &thing{ID: "one", Name: "second"}, map[string]any{"name": "first"}); err != nil || !ok {
+		t.Fatalf("matched update = %v, %v", ok, err)
+	}
+	if ok, err := DeleteIf[thing](ctx, db, "one", map[string]any{"name": "first"}); err != nil || ok {
+		t.Fatalf("stale delete = %v, %v", ok, err)
+	}
+	if ok, err := DeleteIf[thing](ctx, db, "one", map[string]any{"name": "second"}); err != nil || !ok {
+		t.Fatalf("matched delete = %v, %v", ok, err)
+	}
+}
+
+// Hiding the optional capability must fail, never quietly reintroduce a
+// read-then-write race for adapters that have not implemented atomic writes.
+type nonAtomicDB struct{ gowild_data.Database }
+type nonAtomicDAO struct{ gowild_data.TableDAO }
+
+func (db nonAtomicDB) Table(model any) gowild_data.TableDAO {
+	return nonAtomicDAO{db.Database.Table(model)}
+}
+
+func TestAtomicHelpersRefuseUnsupportedTables(t *testing.T) {
+	db := memDB(t)
+	ctx := context.Background()
+	wrapped := nonAtomicDB{db}
+	if _, err := InsertNew(ctx, wrapped, "one", &thing{ID: "one"}); !errors.Is(err, ErrAtomicUnsupported) {
+		t.Fatalf("insert = %v", err)
+	}
+	if _, err := UpdateIf(ctx, wrapped, &thing{ID: "one"}, nil); !errors.Is(err, ErrAtomicUnsupported) {
+		t.Fatalf("update = %v", err)
+	}
+	if _, err := DeleteIf[thing](ctx, wrapped, "one", nil); !errors.Is(err, ErrAtomicUnsupported) {
+		t.Fatalf("delete = %v", err)
+	}
+	if rows, err := All[thing](ctx, db, gowild_data.QueryOpts{}); err != nil || len(rows) != 0 {
+		t.Fatalf("unsupported adapter wrote data: %+v, %v", rows, err)
+	}
+	if _, err := UpdateIf(ctx, nil, &thing{ID: "one"}, nil); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("unavailable update = %v", err)
+	}
+	if _, err := DeleteIf[thing](ctx, nil, "one", nil); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("unavailable delete = %v", err)
 	}
 }

@@ -132,6 +132,31 @@ dao.Update(ctx, task)
 dao.Delete(ctx, "task-1")
 ```
 
+### Conditional writes
+
+The `data/dbx` helpers `InsertNew`, `UpdateIf`, and `DeleteIf` use the SQL
+drivers' optional `AtomicTableDAO` capability. Each makes its decision in one
+SQL statement. `InsertNew` returns false for an existing primary key;
+`UpdateIf` and `DeleteIf` return false for a missing row or a failed condition.
+They never implement a conditional write with a separate read and write.
+
+```go
+// row.Revision is the new revision; base is the revision previously read.
+updated, err := dbx.UpdateIf(ctx, db, row, map[string]any{"revision": base})
+deleted, err := dbx.DeleteIf[Task](ctx, db, row.ID, map[string]any{"revision": base})
+```
+
+Conditions name registered database columns. Values use the same encoding as
+writes, including timestamps and booleans. `nil` matches SQL NULL. A zero
+value for a non-pointer field also matches SQL NULL, consistent with reads
+of nullable columns added to historical rows. Other unique-constraint errors
+remain errors; they do not count as an existing primary key.
+
+The capability is available on ordinary, transaction, and user-scoped tables.
+Adapters wrapping `TableDAO` must also forward `AtomicTableDAO` to use these
+helpers; otherwise the helpers return `dbx.ErrAtomicUnsupported`. Use a
+transaction as well when several writes must commit or roll back together.
+
 ### Querying
 
 ```go
@@ -199,4 +224,3 @@ func TestMyFeature(t *testing.T) {
     // Test...
 }
 ```
-

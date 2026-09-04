@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/original-david-knight/go_wild/data"
+	"github.com/original-david-knight/go_wild/data/dbx"
 )
 
 // The store refuses anything that is not an OKR tree, and each refusal is its
@@ -158,6 +159,23 @@ func (s *ObjectiveStore) Get(ctx context.Context, id string) (*Objective, error)
 // Result re-parented under another one, and the tree would be two levels only
 // until someone typed a PATCH.
 func (s *ObjectiveStore) Update(ctx context.Context, obj *Objective) error {
+	if err := s.prepareUpdate(ctx, obj); err != nil {
+		return err
+	}
+	return s.db.Table(Objective{}).Update(ctx, obj)
+}
+
+// UpdateIf validates and persists a node only while its stored fields still
+// match expected. The condition and write are one database operation, so a
+// revision read before validation cannot authorize a stale overwrite.
+func (s *ObjectiveStore) UpdateIf(ctx context.Context, obj *Objective, expected map[string]any) (bool, error) {
+	if err := s.prepareUpdate(ctx, obj); err != nil {
+		return false, err
+	}
+	return dbx.UpdateIf(ctx, s.db, obj, s.addCompanyScope(expected))
+}
+
+func (s *ObjectiveStore) prepareUpdate(ctx context.Context, obj *Objective) error {
 	if obj == nil || obj.ID == "" {
 		return fmt.Errorf("update objective: id is required")
 	}
@@ -189,35 +207,57 @@ func (s *ObjectiveStore) Update(ctx context.Context, obj *Objective) error {
 		obj.Depth = parent.Depth + 1
 	}
 	obj.UpdatedAt = time.Now().UTC()
-	return s.db.Table(Objective{}).Update(ctx, obj)
+	return nil
 }
 
 // Delete removes an objective and its entire subtree, plus related activity.
 func (s *ObjectiveStore) Delete(ctx context.Context, id string) error {
-	if _, err := s.Get(ctx, id); err != nil {
-		return err
-	}
-	tree, err := s.GetTree(ctx, id)
-	if err != nil {
-		// Fall back to single delete
-		return s.db.Table(Objective{}).Delete(ctx, id)
-	}
+	_, err := s.DeleteIf(ctx, id, nil)
+	return err
+}
 
-	for _, obj := range tree {
-		// Delete related activity events
-		events, _ := s.db.Table(ActivityEvent{}).Query(ctx, gowild_data.QueryOpts{
-			Where: map[string]any{"objective_id": obj.ID},
-		})
-		for _, e := range events {
-			if ev, ok := e.(*ActivityEvent); ok {
-				s.db.Table(ActivityEvent{}).Delete(ctx, ev.ID)
+// DeleteIf removes a subtree only while the root matches expected. Every
+// activity and node deletion participates in the same transaction; callers
+// already in a transaction can include their own related rows in it.
+func (s *ObjectiveStore) DeleteIf(ctx context.Context, id string, expected map[string]any) (bool, error) {
+	deleted := false
+	err := s.db.RunInTransaction(ctx, func(tx gowild_data.Database) error {
+		store := NewObjectiveStore(tx, s.companyID)
+		tree, err := store.GetTree(ctx, id)
+		if err != nil {
+			return err
+		}
+		matched, err := dbx.DeleteIf[Objective](ctx, tx, id, store.addCompanyScope(expected))
+		if err != nil || !matched {
+			return err
+		}
+		for _, obj := range tree {
+			events, err := tx.Table(ActivityEvent{}).Query(ctx, gowild_data.QueryOpts{
+				Where: map[string]any{"objective_id": obj.ID},
+			})
+			if err != nil {
+				return err
+			}
+			for _, e := range events {
+				if ev, ok := e.(*ActivityEvent); ok {
+					if err := tx.Table(ActivityEvent{}).Delete(ctx, ev.ID); err != nil {
+						return err
+					}
+				}
+			}
+			if obj.ID != id {
+				if err := tx.Table(Objective{}).Delete(ctx, obj.ID); err != nil {
+					return err
+				}
 			}
 		}
-
-		// Delete the objective itself
-		s.db.Table(Objective{}).Delete(ctx, obj.ID)
+		deleted = true
+		return nil
+	})
+	if err != nil {
+		return false, err
 	}
-	return nil
+	return deleted, nil
 }
 
 // GetKeyResults returns the Key Results of the named Objective, and nothing
