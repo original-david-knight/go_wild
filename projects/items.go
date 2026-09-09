@@ -15,6 +15,10 @@ import (
 
 // ItemInput is what filing an item takes.
 type ItemInput struct {
+	// ID is an optional stable capture identity. Replays return ErrConflict,
+	// including when the original item was completed, moved or deleted.
+	ID          string
+	Origin      string
 	Type        string
 	Title       string
 	Description string
@@ -137,6 +141,14 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	in.ID = strings.TrimSpace(in.ID)
+	if in.ID != "" {
+		if existing, err := gowild_dbx.Get[Item](ctx, db, in.ID); err != nil {
+			return nil, err
+		} else if existing != nil {
+			return nil, fmt.Errorf("%w: item id %q already exists", ErrConflict, in.ID)
+		}
+	}
 	p := &Project{}
 	if strings.TrimSpace(projectKey) != "" {
 		p, err = s.projectByKey(ctx, db, projectKey)
@@ -209,12 +221,15 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 		ID: newID(), ProjectID: p.ID, Number: number, Type: in.Type,
 		Title: strings.TrimSpace(in.Title), Description: in.Description, Notes: in.Description, Priority: in.Priority,
 		Status: StatusOpen, Assignee: in.Assignee, Tier: in.Tier, Label: label, After: after, Held: in.Held,
-		PRURL: prURL,
+		PRURL: prURL, Origin: in.Origin,
 		// A raw feature or bug is groomed into a spec before it is
 		// implemented; a chore, a code review, or a ticket filed as already
 		// specced, goes straight to work.
 		NeedsGroom: !in.Specced && in.Type != TypeTask && in.Type != TypeChore && in.Type != TypeCodeReview,
 		CreatedBy:  in.CreatedBy, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if in.ID != "" {
+		it.ID = in.ID
 	}
 	if err := db.Table(Item{}).Insert(ctx, it); err != nil {
 		return nil, err
@@ -508,7 +523,7 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 	if it.Type == TypeTask && (it.Assignee != ActorOwner || it.Branch != "" || it.Implementer != "") {
 		return nil, invalidf("personal tasks must be assigned to you and have no coding workflow")
 	}
-	if it.Type != TypeTask && it.Assignee == ActorOwner {
+	if it.Type != TypeTask && it.Assignee == ActorOwner && !(it.Type == TypeCodeReview && it.Status == StatusPendingApproval) {
 		return nil, validationf("assign coding work to a worker or pool")
 	}
 	it.Revision++
@@ -716,6 +731,40 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 	}
 
 	switch in.Action {
+	case ActionRereview:
+		if !isOwner {
+			return nil, forbiddenf("only the owner requests another PR review")
+		}
+		if it.Type != TypeCodeReview {
+			return nil, invalidf("rereview needs a code_review ticket")
+		}
+		if leaseLive(it, now) {
+			return nil, invalidf("a review is already running")
+		}
+		if p.Status != ProjectActive || p.RepoPath == "" {
+			return nil, validationf("reviewing needs an active project with a repository")
+		}
+		agents, err := gowild_dbx.All[Agent](ctx, db, gowild_data.QueryOpts{})
+		if err != nil {
+			return nil, err
+		}
+		it.Assignee = ""
+		it.Tier = topTier(agents)
+		// Keep the earlier reviewer's context when that worker can take work.
+		if a := agentIn(agents, it.Implementer); a != nil && a.Enabled && !a.Out(now) {
+			it.Assignee, it.Tier = a.ID, a.TierOrDefault()
+		}
+		if !tierExists(agents, it.Tier) {
+			return nil, validationf("there is no worker to review the pull request")
+		}
+		to = StatusOpen
+		it.Reviewer, it.Branch = "", ""
+		it.Held, it.NeedsGroom, it.Failures = false, false, 0
+		it.ClosedAt = time.Time{}
+		clearLease()
+		if body == "" {
+			body = "Review the latest pull request changes and refresh the private draft."
+		}
 	case ActionClaim:
 		if it.Type == TypeTask || it.Assignee == ActorOwner {
 			return nil, forbiddenf("personal tasks are not agent work")
@@ -866,7 +915,7 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			}
 			to = StatusPendingApproval
 			it.Implementer = actor
-			it.Assignee = ""
+			it.Assignee = ActorOwner
 			it.Reviewer = ""
 			if verdict != "" {
 				it.LastVerdict, it.LastVerdictBy, it.LastVerdictAt = verdict, actor, now

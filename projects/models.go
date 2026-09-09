@@ -96,6 +96,7 @@ const (
 	ActionRequestChanges = "request_changes"
 	ActionComplete       = "complete"
 	ActionReopen         = "reopen"
+	ActionRereview       = "rereview"
 	ActionClose          = "close"
 	ActionCancel         = "cancel"
 	// ActionAssign is the owner handing an item to another worker; the
@@ -213,7 +214,8 @@ type Item struct {
 	// is pinned to. An open item with no assignee sits in its tier's pool
 	// and goes to whichever worker of that tier pulls it (tiers.go); once
 	// claimed the item stays with its worker. The transitions that hand an
-	// item back to the owner clear it.
+	// item back to the owner clear it, except a code review submitted for
+	// approval is explicitly assigned to ActorOwner.
 	Assignee string `json:"assignee"`
 	// Tier is the pool the item is pulled from while unpinned. Reviews use
 	// the strongest worker in rotation other than the implementer. Filed

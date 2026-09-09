@@ -100,7 +100,7 @@ func TestCodeReviewLifecycle(t *testing.T) {
 	f.refuse("EA-1", TransitionInput{Actor: "claude", Action: ActionSubmit, Body: "looks wrong", Verdict: "reject"}, ErrValidation)
 	f.refuse("EA-1", TransitionInput{Actor: "codex", Action: ActionSubmit, Body: "not mine"}, ErrForbidden)
 	it = f.move("EA-1", TransitionInput{Actor: "claude", Action: ActionSubmit, Body: "The migration drops the index.", Verdict: VerdictRequestChanges})
-	if it.Status != StatusPendingApproval || it.Implementer != "claude" || it.Assignee != "" || it.Branch != "" || it.PRURL != reviewedPR {
+	if it.Status != StatusPendingApproval || it.Implementer != "claude" || it.Assignee != ActorOwner || it.Branch != "" || it.PRURL != reviewedPR {
 		t.Fatalf("code review submit: %+v", it)
 	}
 	if it.LastVerdict != VerdictRequestChanges || it.LastVerdictBy != "claude" || it.LastVerdictAt.IsZero() || !it.LeaseExpiresAt.IsZero() {
@@ -108,6 +108,14 @@ func TestCodeReviewLifecycle(t *testing.T) {
 	}
 	if f.holds("claude", it.ID) {
 		t.Fatal("the reviewer still holds the submitted review")
+	}
+	owned, err := f.s.ListItems(f.ctx, ItemFilter{Assignee: ActorOwner})
+	if err != nil || len(owned) != 1 || owned[0].ID != it.ID {
+		t.Fatalf("submitted review missing from owner's assignments: %+v, %v", owned, err)
+	}
+	title := "Review the migration"
+	if edited, err := f.s.UpdateItem(f.ctx, "EA-1", ItemPatch{Title: &title}, it.Revision); err != nil || edited.Assignee != ActorOwner || edited.Type != TypeCodeReview {
+		t.Fatalf("owner cannot edit a submitted review: %+v, %v", edited, err)
 	}
 	// The owner sends it back for another pass: the reviewer gets it again.
 	f.refuse("EA-1", TransitionInput{Actor: ActorOwner, Action: ActionRequestChanges}, ErrValidation) // no body
