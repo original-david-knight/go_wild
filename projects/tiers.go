@@ -11,10 +11,9 @@ import (
 
 // Tiers and pulls. Workers sit in tiers, higher is stronger, and unpinned
 // work is pulled by the workers of its own tier: the lead while it is in,
-// the others only while the lead is out. A review goes to the item's tier
-// first — its other workers in the same order — and to another tier only
-// when the whole tier is out, strongest tier first. A worker runs up to
-// Slots jobs at once.
+// the others only while the lead is out. Reviews go to the strongest tier
+// first, excluding the implementer, with the same preference within each
+// tier. A worker runs up to Slots jobs at once.
 
 // DefaultTier is the baseline tier: a worker created without one lands
 // here, weaker models go below and stronger ones above.
@@ -135,31 +134,24 @@ func mayPull(rows []*Agent, agent string, tier int, now time.Time) bool {
 	return firstIn(tierWorkers(rows, tier), agent, now)
 }
 
-// mayReview reports whether agent may review an item at tier that
-// implementer built: the item's tier goes first, in pull order, then the
-// other tiers strongest first, and the implementer never reviews itself.
-func mayReview(rows []*Agent, agent, implementer string, tier int, now time.Time) bool {
+// mayReview reports whether agent is the strongest worker in rotation other
+// than the implementer. Within each tier, the lead goes first, then by name.
+func mayReview(rows []*Agent, agent, implementer string, now time.Time) bool {
 	if agent == implementer {
 		return false
 	}
 	var order []*Agent
-	add := func(t int) {
+	for _, t := range tiersOf(rows) {
 		for _, a := range tierWorkers(rows, t) {
 			if a.ID != implementer {
 				order = append(order, a)
 			}
 		}
 	}
-	add(tier)
-	for _, t := range tiersOf(rows) {
-		if t != tier {
-			add(t)
-		}
-	}
 	return firstIn(order, agent, now)
 }
 
-// itemTier is the tier an item is pulled and reviewed at: its own, else —
+// itemTier is the tier an item is pulled from: its own, else —
 // for a row from before tiers — its worker's, else the baseline.
 func itemTier(it *Item, rows []*Agent) int {
 	if it.Tier > 0 {

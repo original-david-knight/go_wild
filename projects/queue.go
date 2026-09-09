@@ -274,8 +274,8 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 		out = append(out, candidate{kind: kind, item: it, project: p})
 	}
 
-	// 2. Reviews of other workers' work: the item's tier first, in pull
-	// order, then the other tiers, strongest first.
+	// 2. Reviews of other workers' work: strongest tier first, with the
+	// lead first within each tier, excluding the implementer.
 	inReview, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{Where: map[string]any{"status": StatusInReview}})
 	if err != nil {
 		return nil, err
@@ -292,7 +292,7 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 		if it.Reviewer != "" && !LeaseExpired(it, now) {
 			continue
 		}
-		if !mayReview(agents, agent, it.Implementer, itemTier(it, agents), now) {
+		if !mayReview(agents, agent, it.Implementer, now) {
 			continue
 		}
 		out = append(out, candidate{kind: JobReview, item: it, project: p})

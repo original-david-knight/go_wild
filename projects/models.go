@@ -215,10 +215,10 @@ type Item struct {
 	// claimed the item stays with its worker. The transitions that hand an
 	// item back to the owner clear it.
 	Assignee string `json:"assignee"`
-	// Tier is the pool the item is pulled from while unpinned, and the tier
-	// its review is offered to first. Filed without one, an item takes the
-	// top tier that has an enabled worker; zero on an older row reads as
-	// its worker's tier, else the baseline.
+	// Tier is the pool the item is pulled from while unpinned. Reviews use
+	// the strongest worker in rotation other than the implementer. Filed
+	// without a tier, an item takes the top tier with an enabled worker;
+	// zero on an older row reads as its worker's tier, else the baseline.
 	Tier int `json:"tier"`
 	// Implementer is the agent that submitted the branch; it sticks after
 	// submit so the merge job and the reviewer-must-differ rule can find it.

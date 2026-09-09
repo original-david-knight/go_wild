@@ -784,8 +784,8 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 			if leaseLive(it, now) {
 				return nil, invalidf("under review by %s", it.Reviewer)
 			}
-			if !mayReview(agents, actor, it.Implementer, tier, now) {
-				return nil, invalidf("the review of tier %d work goes to the tier's other workers first", tier)
+			if !mayReview(agents, actor, it.Implementer, now) {
+				return nil, invalidf("the review goes to the highest-tier worker in rotation other than the implementer")
 			}
 			to = StatusInReview
 			it.Reviewer = actor

@@ -382,50 +382,116 @@ func TestPinningAnUnavailableWorkerIsRefused(t *testing.T) {
 	}
 }
 
-// A review goes to the item's tier first — its other workers in pull order
-// — and to another tier only when the whole tier is out.
-func TestReviewsPreferTheTier(t *testing.T) {
+// Reviews prefer the strongest worker other than the implementer, regardless
+// of the item's tier. Queue offers and direct claims use the same order.
+func TestReviewsPreferHighestTier(t *testing.T) {
+	cases := []struct {
+		name        string
+		implementer string
+		paused      []string
+		quotaOut    string
+		backup      bool
+		want        string
+	}{
+		{name: "stronger worker beats tier peer", implementer: "fable", want: "astra"},
+		{name: "lowest tier work", implementer: "opus", want: "astra"},
+		{name: "implementer excluded", implementer: "astra", want: "fable"},
+		{name: "strongest worker paused", implementer: "fable", paused: []string{"astra"}, want: "sol"},
+		{name: "strongest worker quota unavailable", implementer: "fable", quotaOut: "astra", want: "sol"},
+		{name: "fallback to lowest tier", implementer: "fable", paused: []string{"astra", "sol"}, want: "opus"},
+		{name: "no other worker available", implementer: "fable", paused: []string{"astra", "sol", "opus"}},
+		{name: "lead wins within highest tier", implementer: "fable", backup: true, want: "astra"},
+		{name: "implementing lead excluded before tie break", implementer: "astra", backup: true, want: "amy"},
+		{name: "highest tier backup before lower tiers", implementer: "fable", backup: true, paused: []string{"astra"}, want: "amy"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.tiered()
+			if _, err := f.s.CreateAgent(f.ctx, AgentInput{Name: "astra", CLI: CLICodex, Model: "gpt-6-astra", Tier: 12}); err != nil {
+				t.Fatal(err)
+			}
+			names := []string{"astra", "fable", "sol", "opus"}
+			if c.backup {
+				if _, err := f.s.CreateAgent(f.ctx, AgentInput{Name: "amy", CLI: CLICodex, Model: "test", Tier: 12}); err != nil {
+					t.Fatal(err)
+				}
+				names = append(names, "amy")
+			}
+			f.project("EA")
+			it, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "review routing", Assignee: c.implementer, Specced: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.move("EA-1", TransitionInput{Actor: c.implementer, Action: ActionClaim})
+			f.move("EA-1", TransitionInput{Actor: c.implementer, Action: ActionSubmit, Branch: "pm/ea-1"})
+			for _, name := range c.paused {
+				if _, err := f.s.SetAgentEnabled(f.ctx, name, false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.quotaOut != "" {
+				f.report(c.quotaOut, QuotaReport{Weekly: QuotaWindow{Used: 92, ResetsAt: f.at().Add(24 * time.Hour)}})
+			}
+			for _, name := range names {
+				got := f.peek(name)
+				if name == c.want {
+					if got == nil || got.ID != it.ID {
+						t.Fatalf("%s not offered the review: %+v", name, got)
+					}
+					continue
+				}
+				if got != nil {
+					t.Fatalf("%s offered the review ahead of %q: %+v", name, c.want, got)
+				}
+				wantErr := ErrInvalidTransition
+				if name == c.implementer {
+					wantErr = ErrForbidden
+				}
+				f.refuse("EA-1", TransitionInput{Actor: name, Action: ActionClaim}, wantErr)
+			}
+			if c.want != "" {
+				job, err := f.s.CheckIn(f.ctx, c.want, true, nil)
+				if err != nil || job == nil || job.Kind != JobReview || job.Item.Reviewer != c.want {
+					t.Fatalf("review claim for %s: %v %+v", c.want, err, job)
+				}
+			}
+		})
+	}
+}
+
+// A stronger worker returning does not interrupt a live review. Once the
+// lease expires, the strongest worker takes the next review attempt.
+func TestHighestTierReviewPreservesLiveLease(t *testing.T) {
 	f := newFixture(t)
 	f.tiered()
-	f.project("EA")
-	f.item("EA", "by fable")
-	f.move("EA-1", TransitionInput{Actor: "fable", Action: ActionClaim})
-	f.move("EA-1", TransitionInput{Actor: "fable", Action: ActionSubmit, Branch: "pm/ea-1"})
-	if got := f.offered("sol"); got == nil || got.Number != 1 {
-		t.Fatalf("tier-mate not offered the review: %+v", got)
-	}
-	if got := f.offered("opus"); got != nil {
-		t.Fatalf("another tier offered the review while the tier is in: %+v", got)
-	}
-	f.refuse("EA-1", TransitionInput{Actor: "opus", Action: ActionClaim}, ErrInvalidTransition)
-	f.refuse("EA-1", TransitionInput{Actor: "fable", Action: ActionClaim}, ErrForbidden)
-	// Sol out: opus is the last resort.
-	f.s.SetAgentEnabled(f.ctx, "sol", false)
-	if got := f.offered("opus"); got == nil || got.Number != 1 {
-		t.Fatalf("last-resort reviewer not offered: %+v", got)
-	}
-	f.s.SetAgentEnabled(f.ctx, "sol", true)
-	if got := f.offered("opus"); got != nil {
-		t.Fatalf("last-resort reviewer offered while the tier is in: %+v", got)
-	}
-	// Sol implements: fable reviews, and when fable's quota is gone opus
-	// does rather than the review waiting out the week.
-	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "by sol", Assignee: "sol", Specced: true}); err != nil {
+	if _, err := f.s.CreateAgent(f.ctx, AgentInput{Name: "astra", CLI: CLICodex, Model: "gpt-6-astra", Tier: 12}); err != nil {
 		t.Fatal(err)
 	}
-	f.tick(time.Second)
-	f.move("EA-2", TransitionInput{Actor: "sol", Action: ActionClaim})
-	f.move("EA-2", TransitionInput{Actor: "sol", Action: ActionSubmit, Branch: "pm/ea-2"})
-	if got := f.offered("fable"); got == nil || got.Number != 2 {
-		t.Fatalf("lead not offered the backup's review: %+v", got)
+	f.project("EA")
+	if _, err := f.s.CreateItem(f.ctx, "EA", ItemInput{Title: "by fable", Assignee: "fable", Specced: true}); err != nil {
+		t.Fatal(err)
 	}
-	f.report("fable", f.spentWeek())
-	if got := f.offered("opus"); got == nil || got.Number != 2 {
-		t.Fatalf("opus not offered the review with fable out: %+v", got)
+	f.move("EA-1", TransitionInput{Actor: "fable", Action: ActionClaim})
+	f.move("EA-1", TransitionInput{Actor: "fable", Action: ActionSubmit, Branch: "pm/ea-1"})
+	if _, err := f.s.SetAgentEnabled(f.ctx, "astra", false); err != nil {
+		t.Fatal(err)
 	}
-	f.move("EA-2", TransitionInput{Actor: "opus", Action: ActionClaim})
-	if it, _, _ := f.s.GetItem(f.ctx, "EA-2"); it.Reviewer != "opus" {
-		t.Fatalf("review claim: %+v", it)
+	it := f.move("EA-1", TransitionInput{Actor: "sol", Action: ActionClaim})
+	if _, err := f.s.SetAgentEnabled(f.ctx, "astra", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.peek("astra"); got != nil {
+		t.Fatalf("live review offered to another worker: %+v", got)
+	}
+	f.refuse("EA-1", TransitionInput{Actor: "astra", Action: ActionClaim}, ErrInvalidTransition)
+	f.tick(it.LeaseExpiresAt.Sub(f.at()) + time.Second)
+	if got := f.peek("astra"); got == nil || got.ID != it.ID {
+		t.Fatalf("expired review not offered to strongest worker: %+v", got)
+	}
+	f.refuse("EA-1", TransitionInput{Actor: "sol", Action: ActionClaim}, ErrInvalidTransition)
+	if got := f.move("EA-1", TransitionInput{Actor: "astra", Action: ActionClaim}); got.Reviewer != "astra" {
+		t.Fatalf("strongest worker did not claim expired review: %+v", got)
 	}
 }
 
