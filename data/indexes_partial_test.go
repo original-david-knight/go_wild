@@ -175,3 +175,43 @@ func TestEnsureUniqueIndexWhereRejectsBadInput(t *testing.T) {
 		t.Fatal("empty columns should be rejected")
 	}
 }
+
+func TestMigrateUniqueIndexKeepsConstraintAndAllowsUnnumberedRows(t *testing.T) {
+	db, err := NewSqliteDatabase(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.AddTable(auditRow{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureUniqueIndex(db, auditRow{}, "old_number", "org_id"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	dao := db.Table(auditRow{})
+	if err := dao.Insert(ctx, &auditRow{ID: "first", OrgID: 0}); err != nil {
+		t.Fatal(err)
+	}
+	// A failed replacement leaves the original index in force.
+	if err := MigrateUniqueIndex(db, auditRow{}, "old_number", "bad_number", []string{"org_id"}, "missing_column > 0"); err == nil {
+		t.Fatal("invalid replacement accepted")
+	}
+	if err := dao.Insert(ctx, &auditRow{ID: "second", OrgID: 0}); err == nil {
+		t.Fatal("failed migration dropped the original constraint")
+	}
+	for range 2 {
+		if err := MigrateUniqueIndex(db, auditRow{}, "old_number", "new_number", []string{"org_id"}, "org_id > 0"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := dao.Insert(ctx, &auditRow{ID: "second", OrgID: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dao.Insert(ctx, &auditRow{ID: "numbered", OrgID: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dao.Insert(ctx, &auditRow{ID: "duplicate", OrgID: 1}); err == nil {
+		t.Fatal("numbered identities must stay unique")
+	}
+}

@@ -306,6 +306,9 @@ func (s *Service) Counts(ctx context.Context, projectID string) (map[string]int,
 		counts[st] = 0
 	}
 	for _, it := range rows {
+		if it.Deleted {
+			continue
+		}
 		counts[it.Status]++
 	}
 	return counts, nil

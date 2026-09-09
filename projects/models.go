@@ -42,6 +42,7 @@ func Ended(status string) bool {
 
 // Item types.
 const (
+	TypeTask    = "task"
 	TypeFeature = "feature"
 	TypeBug     = "bug"
 	TypeChore   = "chore"
@@ -53,7 +54,7 @@ const (
 )
 
 // Types lists every item type.
-var Types = []string{TypeFeature, TypeBug, TypeChore, TypeCodeReview}
+var Types = []string{TypeTask, TypeFeature, TypeBug, TypeChore, TypeCodeReview}
 
 // Item priorities, lowest first.
 const (
@@ -267,6 +268,16 @@ type Item struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	ClosedAt  time.Time `json:"closed_at"`
+	// Personal-task fields share the item identity and revision. AssignedID
+	// names an objective/key result; Assignee names who does the work.
+	Notes           string    `json:"notes"`
+	Due             string    `json:"due"`
+	Done            bool      `json:"done"`
+	CompletedAt     time.Time `json:"completed_at"`
+	Origin          string    `json:"origin"`
+	AssignedID      string    `json:"assigned_id"`
+	Deleted         bool      `json:"-"`
+	DeletedRevision int       `json:"-"`
 }
 
 // TableName pins the table name against a later model rename.
@@ -427,6 +438,6 @@ func init() {
 		if err := gowild_data.EnsureUniqueIndex(db, Project{}, "project_projects_key", "key"); err != nil {
 			return err
 		}
-		return gowild_data.EnsureUniqueIndex(db, Item{}, "project_items_project_number", "project_id", "number")
+		return gowild_data.MigrateUniqueIndex(db, Item{}, "project_items_project_number", "project_items_numbered", []string{"project_id", "number"}, "number > 0")
 	})
 }

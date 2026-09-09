@@ -36,6 +36,30 @@ func EnsureUniqueIndex(db Database, model any, indexName string, columns ...stri
 	return ensureUniqueIndexWhere(db, model, indexName, columns, "")
 }
 
+// MigrateUniqueIndex replaces an older full index with a new, optionally
+// partial one. Both DDL operations commit together; a failed replacement keeps
+// the original constraint. Names and predicates are trusted schema constants.
+func MigrateUniqueIndex(db Database, model any, oldName, newName string, columns []string, predicate string) error {
+	if oldName == newName {
+		return fmt.Errorf("an index migration needs distinct old and new names")
+	}
+	old, err := quoteIdentifier(oldName)
+	if err != nil {
+		return err
+	}
+	return db.RunInTransaction(context.Background(), func(tx Database) error {
+		if err := ensureUniqueIndexWhere(tx, model, newName, columns, predicate); err != nil {
+			return err
+		}
+		exec, _, _, err := sqlExecAndTableForModel(tx, model)
+		if err != nil {
+			return err
+		}
+		_, err = exec.ExecContext(context.Background(), "DROP INDEX IF EXISTS "+old)
+		return err
+	})
+}
+
 // ensureUniqueIndexWhere creates a (possibly partial) unique index if it
 // does not already exist. If whereClause is non-empty, it is appended as a
 // SQL `WHERE <clause>` predicate, producing a partial unique index. Both

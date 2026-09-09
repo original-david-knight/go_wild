@@ -260,6 +260,9 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 	merging := mergingProjects(approved, now)
 	SortItems(approved)
 	for _, it := range approved {
+		if it.Deleted || it.Type == TypeTask || it.Assignee == ActorOwner {
+			continue
+		}
 		p := workable(it.ProjectID)
 		if p == nil || it.Implementer != agent || leaseLive(it, now) || it.Held || merging[it.ProjectID] {
 			continue
@@ -279,6 +282,9 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 	}
 	SortItems(inReview)
 	for _, it := range inReview {
+		if it.Deleted || it.Type == TypeTask || it.Assignee == ActorOwner {
+			continue
+		}
 		p := workable(it.ProjectID)
 		if p == nil || it.Implementer == agent || it.Held {
 			continue
@@ -303,6 +309,9 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 	}
 	SortItems(inProgress)
 	for _, it := range inProgress {
+		if it.Deleted || it.Type == TypeTask || it.Assignee == ActorOwner {
+			continue
+		}
 		if p := workable(it.ProjectID); p != nil && !leaseLive(it, now) && !it.Held {
 			// A resumed item picks its kind the way a fresh one does: a
 			// crashed groom resumes as a groom, a code review as a code
@@ -327,12 +336,18 @@ func (s *Service) candidates(ctx context.Context, db gowild_data.Database, agent
 	}
 	open := pinned
 	for _, it := range pool {
+		if it.Deleted || it.Type == TypeTask || it.Assignee == ActorOwner {
+			continue
+		}
 		if tier := itemTier(it, agents); tier == me.TierOrDefault() && mayPull(agents, agent, tier, now) {
 			open = append(open, it)
 		}
 	}
 	SortItems(open)
 	for _, it := range open {
+		if it.Deleted || it.Type == TypeTask || it.Assignee == ActorOwner {
+			continue
+		}
 		p := workable(it.ProjectID)
 		if p == nil || it.Held {
 			continue
@@ -370,6 +385,9 @@ func jobKindFor(it *Item) string {
 func mergingProjects(approved []*Item, now time.Time) map[string]bool {
 	out := map[string]bool{}
 	for _, it := range approved {
+		if it.Deleted || it.Type == TypeTask || it.Assignee == ActorOwner {
+			continue
+		}
 		if leaseLive(it, now) {
 			out[it.ProjectID] = true
 		}
@@ -408,6 +426,9 @@ func (s *Service) liveLeasesForAgent(ctx context.Context, db gowild_data.Databas
 	}
 	out := []*Item{}
 	for _, it := range leased {
+		if it.Deleted || it.Type == TypeTask || it.Assignee == ActorOwner {
+			continue
+		}
 		if holdsLiveLease(it, agent, now) {
 			out = append(out, it)
 		}

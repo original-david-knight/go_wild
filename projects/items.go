@@ -128,7 +128,7 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 		in.CreatedBy = ActorOwner
 	}
 	in.Assignee = strings.TrimSpace(in.Assignee)
-	if in.Assignee != "" && !ValidAgentName(in.Assignee) {
+	if in.Assignee != "" && in.Assignee != ActorOwner && !ValidAgentName(in.Assignee) {
 		return nil, validationf("assignee %q is not an agent name", in.Assignee)
 	}
 	label, err := cleanLabel(in.Label)
@@ -137,9 +137,22 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	p, err := s.projectByKey(ctx, db, projectKey)
-	if err != nil {
-		return nil, err
+	p := &Project{}
+	if strings.TrimSpace(projectKey) != "" {
+		p, err = s.projectByKey(ctx, db, projectKey)
+		if err != nil {
+			return nil, err
+		}
+	} else if in.Type != TypeTask {
+		return nil, validationf("agent work needs a project")
+	}
+	if in.Type == TypeTask {
+		if in.Assignee != "" && in.Assignee != ActorOwner {
+			return nil, validationf("choose a coding type to delegate a task")
+		}
+		in.Assignee = ActorOwner
+	} else if in.Assignee == ActorOwner {
+		return nil, validationf("choose task for work assigned to you")
 	}
 	// The dependency is resolved under the mutex so the item it names
 	// cannot vanish between the check and the write. Nothing references a
@@ -151,31 +164,33 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 	// The item goes into a tier's pool — the pinned worker's tier, the one
 	// named, else the top tier — and only a pin is a hand-off in the feed.
 	now := s.Now()
-	agents, err := gowild_dbx.All[Agent](ctx, db, gowild_data.QueryOpts{})
-	if err != nil {
-		return nil, err
-	}
-	if len(agents) == 0 {
-		return nil, validationf("there is no worker to take the item; create an agent first")
-	}
 	named := in.Assignee != ""
-	if named {
-		a := agentIn(agents, in.Assignee)
-		if a == nil {
-			return nil, validationf("assignee %q is not a worker", in.Assignee)
-		}
-		if err := pinnable(a, now); err != nil {
+	if in.Type != TypeTask {
+		agents, err := gowild_dbx.All[Agent](ctx, db, gowild_data.QueryOpts{})
+		if err != nil {
 			return nil, err
 		}
-		if in.Tier == 0 {
-			in.Tier = a.TierOrDefault()
+		if len(agents) == 0 {
+			return nil, validationf("there is no worker to take the item; create an agent first")
 		}
-	}
-	if in.Tier == 0 {
-		in.Tier = topTier(agents)
-	}
-	if in.Tier < 0 || !tierExists(agents, in.Tier) {
-		return nil, validationf("no worker is at tier %d", in.Tier)
+		if named {
+			a := agentIn(agents, in.Assignee)
+			if a == nil {
+				return nil, validationf("assignee %q is not a worker", in.Assignee)
+			}
+			if err := pinnable(a, now); err != nil {
+				return nil, err
+			}
+			if in.Tier == 0 {
+				in.Tier = a.TierOrDefault()
+			}
+		}
+		if in.Tier == 0 {
+			in.Tier = topTier(agents)
+		}
+		if in.Tier < 0 || !tierExists(agents, in.Tier) {
+			return nil, validationf("no worker is at tier %d", in.Tier)
+		}
 	}
 	number := p.NextNumber
 	if number < 1 {
@@ -183,18 +198,22 @@ func (s *Service) CreateItem(ctx context.Context, projectKey string, in ItemInpu
 	}
 	p.NextNumber = number + 1
 	p.UpdatedAt = now
-	if err := db.Table(Project{}).Update(ctx, p); err != nil {
-		return nil, err
+	if p.ID != "" {
+		if err := db.Table(Project{}).Update(ctx, p); err != nil {
+			return nil, err
+		}
+	} else {
+		number = 0
 	}
 	it := &Item{
 		ID: newID(), ProjectID: p.ID, Number: number, Type: in.Type,
-		Title: strings.TrimSpace(in.Title), Description: in.Description, Priority: in.Priority,
+		Title: strings.TrimSpace(in.Title), Description: in.Description, Notes: in.Description, Priority: in.Priority,
 		Status: StatusOpen, Assignee: in.Assignee, Tier: in.Tier, Label: label, After: after, Held: in.Held,
 		PRURL: prURL,
 		// A raw feature or bug is groomed into a spec before it is
 		// implemented; a chore, a code review, or a ticket filed as already
 		// specced, goes straight to work.
-		NeedsGroom: !in.Specced && in.Type != TypeChore && in.Type != TypeCodeReview,
+		NeedsGroom: !in.Specced && in.Type != TypeTask && in.Type != TypeChore && in.Type != TypeCodeReview,
 		CreatedBy:  in.CreatedBy, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := db.Table(Item{}).Insert(ctx, it); err != nil {
@@ -222,6 +241,25 @@ func (s *Service) GetItem(ctx context.Context, key string) (*Item, *Project, err
 }
 
 func (s *Service) itemByKey(ctx context.Context, db gowild_data.Database, key string) (*Item, *Project, error) {
+	// Stable ids work before and after attaching a project.
+	if it, err := gowild_dbx.Get[Item](ctx, db, strings.TrimSpace(key)); err != nil {
+		return nil, nil, err
+	} else if it != nil {
+		if it.Deleted {
+			return nil, nil, ErrNotFound
+		}
+		p := &Project{}
+		if it.ProjectID != "" {
+			p, err = gowild_dbx.Get[Project](ctx, db, it.ProjectID)
+			if err != nil {
+				return nil, nil, err
+			}
+			if p == nil {
+				return nil, nil, ErrNotFound
+			}
+		}
+		return it, p, nil
+	}
 	projectKey, number, err := ParseItemKey(key)
 	if err != nil {
 		return nil, nil, err
@@ -236,7 +274,7 @@ func (s *Service) itemByKey(ctx context.Context, db gowild_data.Database, key st
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(rows) == 0 {
+	if len(rows) == 0 || rows[0].Deleted {
 		return nil, nil, fmt.Errorf("%w: item %s-%d", ErrNotFound, p.Key, number)
 	}
 	return rows[0], p, nil
@@ -247,7 +285,7 @@ func (s *Service) itemByID(ctx context.Context, db gowild_data.Database, id stri
 	if err != nil {
 		return nil, err
 	}
-	if it == nil {
+	if it == nil || it.Deleted {
 		return nil, fmt.Errorf("%w: item id %s", ErrNotFound, id)
 	}
 	return it, nil
@@ -288,6 +326,13 @@ func (s *Service) ListItems(ctx context.Context, f ItemFilter) ([]*Item, error) 
 	if err != nil {
 		return nil, err
 	}
+	active := rows[:0]
+	for _, it := range rows {
+		if !it.Deleted {
+			active = append(active, it)
+		}
+	}
+	rows = active
 	if len(f.Statuses) == 0 && !f.IncludeClosed {
 		kept := rows[:0]
 		for _, it := range rows {
@@ -339,6 +384,7 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 	}
 	if patch.Description != nil {
 		it.Description = *patch.Description
+		it.Notes = *patch.Description
 	}
 	if patch.Type != nil {
 		if !validType(*patch.Type) {
@@ -406,7 +452,7 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 	assignTo, assignChanged := "", false
 	if patch.Assignee != nil {
 		assignTo = strings.TrimSpace(*patch.Assignee)
-		if assignTo != "" && !ValidAgentName(assignTo) {
+		if assignTo != "" && assignTo != ActorOwner && !ValidAgentName(assignTo) {
 			return nil, validationf("assignee %q is not an agent name", assignTo)
 		}
 		if assignTo != it.Assignee {
@@ -426,7 +472,13 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 			default:
 				return nil, invalidf("only an open item, or an in-progress one whose lease expired, is reassigned; this one is %s", it.Status)
 			}
-			if assignTo != "" {
+			if assignTo == ActorOwner {
+				if it.Branch != "" || it.Implementer != "" {
+					return nil, invalidf("finish or cancel the coding workflow before assigning to you")
+				}
+				it.Type = TypeTask
+				it.NeedsGroom = false
+			} else if assignTo != "" {
 				a := agentIn(agents, assignTo)
 				if a == nil {
 					return nil, validationf("assignee %q is not a worker", assignTo)
@@ -435,13 +487,33 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 					return nil, err
 				}
 			}
+			if assignTo != ActorOwner && it.Type == TypeTask {
+				if it.ProjectID == "" || p.RepoPath == "" {
+					return nil, validationf("delegating needs a project with a repository")
+				}
+				it.Type = TypeChore
+				if assignTo != "" {
+					it.Tier = agentIn(agents, assignTo).TierOrDefault()
+				} else {
+					it.Tier = topTier(agents)
+					if !tierExists(agents, it.Tier) {
+						return nil, validationf("there is no worker to take the task")
+					}
+				}
+			}
 			it.Assignee = assignTo
 			assignChanged = true
 		}
 	}
+	if it.Type == TypeTask && (it.Assignee != ActorOwner || it.Branch != "" || it.Implementer != "") {
+		return nil, invalidf("personal tasks must be assigned to you and have no coding workflow")
+	}
+	if it.Type != TypeTask && it.Assignee == ActorOwner {
+		return nil, validationf("assign coding work to a worker or pool")
+	}
 	it.Revision++
 	it.UpdatedAt = now
-	if err := db.Table(Item{}).Update(ctx, it); err != nil {
+	if err := saveItemRevision(ctx, db, it); err != nil {
 		return nil, err
 	}
 	if assignChanged {
@@ -645,6 +717,9 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 
 	switch in.Action {
 	case ActionClaim:
+		if it.Type == TypeTask || it.Assignee == ActorOwner {
+			return nil, forbiddenf("personal tasks are not agent work")
+		}
 		if isOwner {
 			return nil, forbiddenf("the owner does not claim work")
 		}
@@ -939,6 +1014,18 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		it.LastVerdict, it.LastVerdictBy, it.LastVerdictAt = VerdictRequestChanges, actor, now
 		clearLease()
 	case ActionComplete:
+		if it.Type == TypeTask {
+			if !isOwner {
+				return nil, forbiddenf("only the owner completes a personal task")
+			}
+			if Ended(from) {
+				return nil, invalidf("cannot complete from %s", from)
+			}
+			to = StatusDone
+			it.ClosedAt = now
+			clearLease()
+			break
+		}
 		if it.Type == TypeCodeReview {
 			return nil, invalidf("a code review completes through approve")
 		}
@@ -1053,9 +1140,21 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 	}
 
 	it.Status = to
+	it.Done = to == StatusDone || to == StatusClosed
+	if it.Done {
+		if it.CompletedAt.IsZero() {
+			it.CompletedAt = now
+		}
+	} else {
+		it.CompletedAt = time.Time{}
+	}
+	if it.Type == TypeTask {
+		it.Assignee = ActorOwner
+	}
+	it.Notes = it.Description
 	it.Revision++
 	it.UpdatedAt = now
-	if err := db.Table(Item{}).Update(ctx, it); err != nil {
+	if err := saveItemRevision(ctx, db, it); err != nil {
 		return nil, err
 	}
 	c := &Comment{
@@ -1111,4 +1210,17 @@ func (s *Service) CommentOnItem(ctx context.Context, key, author, body string) (
 	}
 	s.wake()
 	return c, nil
+}
+
+// saveItemRevision coordinates workflow writes with task edits from other
+// clients; a stale snapshot never overwrites an unrelated field.
+func saveItemRevision(ctx context.Context, db gowild_data.Database, it *Item) error {
+	ok, err := gowild_dbx.UpdateIf(ctx, db, it, map[string]any{"revision": it.Revision - 1})
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrStaleRevision
+	}
+	return nil
 }

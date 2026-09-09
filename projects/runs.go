@@ -191,7 +191,8 @@ func (s *Service) noteRunOutcome(ctx context.Context, db gowild_data.Database, r
 		}
 		it.Failures = 0
 		it.UpdatedAt = now
-		return db.Table(Item{}).Update(ctx, it)
+		it.Revision++
+		return saveItemRevision(ctx, db, it)
 	}
 	it.Failures++
 	holdNow := it.Failures >= MaxItemFailures && !it.Held
@@ -199,7 +200,8 @@ func (s *Service) noteRunOutcome(ctx context.Context, db gowild_data.Database, r
 		it.Held = true
 	}
 	it.UpdatedAt = now
-	if err := db.Table(Item{}).Update(ctx, it); err != nil {
+	it.Revision++
+	if err := saveItemRevision(ctx, db, it); err != nil {
 		return err
 	}
 	if !holdNow {

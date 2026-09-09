@@ -2,12 +2,14 @@ package gowild_projects
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 	"regexp"
 	"strconv"
 	"strings"
 )
 
 var (
+	taskIDRe     = regexp.MustCompile(`^t-[A-Za-z0-9][A-Za-z0-9-]{2,78}$`)
 	projectKeyRe = regexp.MustCompile(`^[A-Z]{2,6}$`)
 	itemKeyRe    = regexp.MustCompile(`^([A-Z]{2,6})-([0-9]{1,9})$`)
 	agentNameRe  = regexp.MustCompile(`^[a-z0-9]{2,16}$`)
@@ -47,6 +49,9 @@ func ValidEffort(cli, effort string) bool {
 
 // ItemKey is the item's human key, "EA-12".
 func ItemKey(project *Project, item *Item) string {
+	if project == nil || project.Key == "" || item.Number == 0 {
+		return item.ID
+	}
 	return fmt.Sprintf("%s-%d", project.Key, item.Number)
 }
 
@@ -156,3 +161,6 @@ func validPriority(s string) bool {
 	}
 	return false
 }
+
+// ValidItemID accepts a stable personal-task id or a tracker-minted UUID.
+func ValidItemID(id string) bool { return taskIDRe.MatchString(id) || uuid.Validate(id) == nil }
