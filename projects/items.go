@@ -51,6 +51,9 @@ type ItemInput struct {
 // ItemPatch is a partial edit of the descriptive fields; nil leaves a field
 // alone.
 type ItemPatch struct {
+	// ProjectID moves unstarted work to an active project. Stable ids survive
+	// the move; numbered tickets with dependencies cannot move.
+	ProjectID   *string
 	Title       *string
 	Description *string
 	Type        *string
@@ -393,6 +396,34 @@ func (s *Service) UpdateItem(ctx context.Context, key string, patch ItemPatch, b
 	}
 	if baseRevision > 0 && it.Revision != baseRevision {
 		return nil, fmt.Errorf("%w: item is at revision %d, not %d", ErrStaleRevision, it.Revision, baseRevision)
+	}
+	if patch.ProjectID != nil {
+		id := strings.TrimSpace(*patch.ProjectID)
+		target, err := gowild_dbx.Get[Project](ctx, db, id)
+		if err != nil {
+			return nil, err
+		}
+		if target == nil || target.Status != ProjectActive || strings.TrimSpace(target.RepoPath) == "" {
+			return nil, validationf("choose an active project with a repository")
+		}
+		if id != it.ProjectID {
+			if it.Branch != "" || it.Implementer != "" || leaseLive(it, s.Now()) || it.After != "" {
+				return nil, invalidf("work with a branch, implementer, live lease or dependency cannot move projects")
+			}
+			rows, err := gowild_dbx.All[Item](ctx, db, gowild_data.QueryOpts{})
+			if err != nil {
+				return nil, err
+			}
+			for _, other := range rows {
+				if other.After == ItemKey(p, it) {
+					return nil, invalidf("another item depends on this task; it cannot move projects")
+				}
+			}
+			// The stable id remains the address after a move, as it does for
+			// personal tasks moved through the Tasks API.
+			it.ProjectID, it.Number = id, 0
+		}
+		p = target
 	}
 	if patch.Title != nil {
 		if strings.TrimSpace(*patch.Title) == "" {

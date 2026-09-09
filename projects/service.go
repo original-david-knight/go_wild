@@ -74,6 +74,25 @@ func NewService(db DBFunc, opts ...Option) *Service {
 // Now is the service's clock, UTC.
 func (s *Service) Now() time.Time { return s.now().UTC() }
 
+// InTransaction serializes a compound owner action with worker claims. The
+// callback uses a transaction-bound service; workers wake only after commit.
+// Callers must use the supplied service and database inside the callback.
+func (s *Service) InTransaction(ctx context.Context, fn func(*Service, gowild_data.Database) error) error {
+	db, err := s.database()
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err = db.RunInTransaction(ctx, func(tx gowild_data.Database) error {
+		return fn(NewService(func() gowild_data.Database { return tx }, WithClock(s.now), WithLease(s.lease)), tx)
+	})
+	if err == nil {
+		s.wake()
+	}
+	return err
+}
+
 // wake tells every parked Wait to re-evaluate its queue. Every write that
 // can create work calls it once the write is in: an item created,
 // reassigned or transitioned, a mention recorded or synchronized, an agent
