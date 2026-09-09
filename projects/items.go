@@ -85,6 +85,9 @@ type ItemFilter struct {
 // TransitionInput drives the state machine. Actor is ActorOwner or an agent
 // name; the other fields matter to the actions that read them.
 type TransitionInput struct {
+	// Only CompleteReview sets this after checking the revision and lease.
+	reviewSubmitted bool
+
 	Actor   string
 	Action  string
 	Body    string
@@ -1036,7 +1039,7 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		if !isOwner {
 			return nil, forbiddenf("only the owner approves")
 		}
-		if from != StatusPendingApproval {
+		if from != StatusPendingApproval && !in.reviewSubmitted {
 			return nil, invalidf("cannot approve from %s", from)
 		}
 		to = StatusApproved

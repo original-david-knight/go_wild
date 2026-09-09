@@ -9,7 +9,8 @@ import (
 // QueueReview reuses an earlier PR ticket, including a retained deletion or
 // a legacy personal review task. An already queued or running review is a no-op.
 // The caller resolves the PR identity; this method owns the atomic handoff.
-func (s *Service) QueueReview(ctx context.Context, id, prURL string) (*Item, error) {
+// An optional revision rejects a stale connector observation.
+func (s *Service) QueueReview(ctx context.Context, id, prURL string, revision ...int) (*Item, error) {
 	db, err := s.database()
 	if err != nil {
 		return nil, err
@@ -22,6 +23,9 @@ func (s *Service) QueueReview(ctx context.Context, id, prURL string) (*Item, err
 	}
 	if it == nil {
 		return nil, ErrNotFound
+	}
+	if len(revision) > 0 && it.Revision != revision[0] {
+		return nil, ErrConflict
 	}
 	if it.Type != TypeCodeReview && it.Type != TypeTask {
 		return nil, invalidf("the earlier ticket is already being used for other work")
@@ -56,6 +60,40 @@ func (s *Service) QueueReview(ctx context.Context, id, prURL string) (*Item, err
 		}
 	}
 	if _, err := s.applyTransition(ctx, db, it, p, TransitionInput{Actor: ActorOwner, Action: ActionRereview}); err != nil {
+		return nil, err
+	}
+	s.wake()
+	return it, nil
+}
+
+// CompleteReview records a review submitted by the owner on the PR host.
+// The connector supplies the observed revision so a concurrent manual request
+// cannot be cleared by an older observation. A running worker finishes its
+// handoff first; the connector retries on its next poll.
+func (s *Service) CompleteReview(ctx context.Context, id string, revision int, body string) (*Item, error) {
+	db, err := s.database()
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	it, p, err := s.itemByKey(ctx, db, id)
+	if err != nil {
+		return nil, err
+	}
+	if it.Revision != revision || leaseLive(it, s.Now()) {
+		return nil, ErrConflict
+	}
+	if it.Type != TypeCodeReview {
+		return nil, invalidf("only a code review can complete from a submitted PR review")
+	}
+	if Ended(it.Status) {
+		return it, nil
+	}
+	_, err = s.applyTransition(ctx, db, it, p, TransitionInput{
+		Actor: ActorOwner, Action: ActionApprove, Body: body, reviewSubmitted: true,
+	})
+	if err != nil {
 		return nil, err
 	}
 	s.wake()
