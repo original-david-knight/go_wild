@@ -91,12 +91,13 @@ type TransitionInput struct {
 	// Only CompleteReview sets this after checking the revision and lease.
 	reviewSubmitted bool
 
-	Actor   string
-	Action  string
-	Body    string
-	Branch  string
-	PRURL   string
-	Verdict string
+	Actor        string
+	Action       string
+	Body         string
+	Branch       string
+	PRURL        string
+	Verdict      string
+	ReviewCommit string
 	// Description, Tier and Assignee belong to ActionGroom: the spec the
 	// groomer wrote, the tier it puts the item in (0 keeps it), and a worker
 	// it pins the item to ("" returns it to the tier's pool).
@@ -966,6 +967,7 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		}
 		to = StatusInReview
 		it.Branch = branch
+		it.ReviewCommit = ""
 		if strings.TrimSpace(in.PRURL) != "" {
 			it.PRURL = strings.TrimSpace(in.PRURL)
 		}
@@ -990,18 +992,44 @@ func (s *Service) applyTransition(ctx context.Context, db gowild_data.Database, 
 		switch verdict {
 		case VerdictApprove:
 			to = StatusPendingApproval
+			if p.MergeApprovalOrDefault() == MergeApprovalAutomatic {
+				if !validReviewCommit(in.ReviewCommit) {
+					return nil, validationf("automatic engineering review needs the exact reviewed commit")
+				}
+				to = StatusApproved
+			}
+			if in.ReviewCommit != "" && !validReviewCommit(in.ReviewCommit) {
+				return nil, validationf("review commit must be a full hexadecimal Git commit")
+			}
+			it.ReviewCommit = in.ReviewCommit
 			it.Assignee = ""
 		case VerdictRequestChanges:
 			if body == "" {
 				return nil, validationf("request_changes needs a review body")
 			}
 			to = StatusInProgress
+			it.ReviewCommit = ""
 			it.Assignee = it.Implementer
 		default:
 			return nil, validationf("verdict %q is not approve or request_changes", in.Verdict)
 		}
 		it.Reviewer = actor
 		it.LastVerdict, it.LastVerdictBy, it.LastVerdictAt = verdict, actor, now
+		clearLease()
+	case ActionRework:
+		if p.MergeApprovalOrDefault() != MergeApprovalAutomatic || from != StatusApproved {
+			return nil, invalidf("rework requires automatically approved engineering work")
+		}
+		if isOwner || actor != it.Implementer {
+			return nil, forbiddenf("only the implementer returns automatic merge work for fixes")
+		}
+		if body == "" {
+			return nil, validationf("rework needs the reason another implementation review is required")
+		}
+		to = StatusInProgress
+		it.Assignee = it.Implementer
+		it.ReviewCommit = ""
+		it.LastVerdict, it.LastVerdictBy, it.LastVerdictAt = VerdictRequestChanges, actor, now
 		clearLease()
 	case ActionGroom:
 		if isOwner {

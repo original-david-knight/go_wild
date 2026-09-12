@@ -76,6 +76,12 @@ const (
 	MergePolicyPullRequest = "pull_request"
 )
 
+// Merge approval is per project. Empty legacy rows retain owner approval.
+const (
+	MergeApprovalOwner     = "owner"
+	MergeApprovalAutomatic = "automatic"
+)
+
 // Project statuses.
 const (
 	ProjectActive   = "active"
@@ -91,6 +97,7 @@ const (
 	ActionRelease        = "release"
 	ActionSubmit         = "submit"
 	ActionReview         = "review"
+	ActionRework         = "rework"
 	ActionBlock          = "block"
 	ActionApprove        = "approve"
 	ActionRequestChanges = "request_changes"
@@ -186,6 +193,7 @@ type Project struct {
 	RepoPath      string `json:"repo_path"`
 	DefaultBranch string `json:"default_branch"`
 	MergePolicy   string `json:"merge_policy"`
+	MergeApproval string `json:"merge_approval"`
 	// Instructions is free text appended to every agent prompt for this
 	// project.
 	Instructions string `json:"instructions"`
@@ -198,6 +206,13 @@ type Project struct {
 
 // TableName pins the table name against a later model rename.
 func (Project) TableName() string { return "project_projects" }
+
+func (p Project) MergeApprovalOrDefault() string {
+	if p.MergeApproval == MergeApprovalAutomatic {
+		return MergeApprovalAutomatic
+	}
+	return MergeApprovalOwner
+}
 
 // Item is one unit of work: a feature, a bug, a chore or a code review.
 type Item struct {
@@ -232,6 +247,9 @@ type Item struct {
 	ClaimedAt      time.Time `json:"claimed_at"`
 	LeaseExpiresAt time.Time `json:"lease_expires_at"`
 	Branch         string    `json:"branch"`
+	// ReviewCommit binds an engineering review to the source inspected by
+	// the runner. Automatic merge refuses a branch that moved afterward.
+	ReviewCommit string `json:"review_commit"`
 	// PRURL is the pull request: the one a complete reports, or, on a
 	// code_review item, the one under review — required there, and
 	// validated as a GitHub pull request URL when an item is filed or

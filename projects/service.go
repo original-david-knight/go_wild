@@ -139,6 +139,7 @@ type ProjectInput struct {
 	RepoPath      string
 	DefaultBranch string
 	MergePolicy   string
+	MergeApproval string
 	Instructions  string
 }
 
@@ -149,6 +150,7 @@ type ProjectPatch struct {
 	RepoPath      *string
 	DefaultBranch *string
 	MergePolicy   *string
+	MergeApproval *string
 	Instructions  *string
 	Status        *string
 }
@@ -156,6 +158,8 @@ type ProjectPatch struct {
 func validMergePolicy(p string) bool {
 	return p == MergePolicyMerge || p == MergePolicyPullRequest
 }
+
+func validMergeApproval(p string) bool { return p == MergeApprovalOwner || p == MergeApprovalAutomatic }
 
 // CreateProject inserts a project. The key must be unique.
 func (s *Service) CreateProject(ctx context.Context, in ProjectInput) (*Project, error) {
@@ -176,6 +180,12 @@ func (s *Service) CreateProject(ctx context.Context, in ProjectInput) (*Project,
 	if !validMergePolicy(in.MergePolicy) {
 		return nil, validationf("merge policy %q is not merge or pull_request", in.MergePolicy)
 	}
+	if in.MergeApproval == "" {
+		in.MergeApproval = MergeApprovalOwner
+	}
+	if !validMergeApproval(in.MergeApproval) {
+		return nil, validationf("merge approval must be owner or automatic")
+	}
 	if in.DefaultBranch == "" {
 		in.DefaultBranch = "main"
 	}
@@ -192,7 +202,7 @@ func (s *Service) CreateProject(ctx context.Context, in ProjectInput) (*Project,
 	p := &Project{
 		ID: newID(), Key: in.Key, Name: strings.TrimSpace(in.Name), Description: in.Description,
 		RepoPath: strings.TrimSpace(in.RepoPath), DefaultBranch: in.DefaultBranch,
-		MergePolicy: in.MergePolicy, Instructions: in.Instructions,
+		MergePolicy: in.MergePolicy, MergeApproval: in.MergeApproval, Instructions: in.Instructions,
 		Status: ProjectActive, NextNumber: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := db.Table(Project{}).Insert(ctx, p); err != nil {
@@ -287,6 +297,12 @@ func (s *Service) UpdateProject(ctx context.Context, key string, patch ProjectPa
 			return nil, validationf("merge policy %q is not merge or pull_request", *patch.MergePolicy)
 		}
 		p.MergePolicy = *patch.MergePolicy
+	}
+	if patch.MergeApproval != nil {
+		if !validMergeApproval(*patch.MergeApproval) {
+			return nil, validationf("merge approval must be owner or automatic")
+		}
+		p.MergeApproval = *patch.MergeApproval
 	}
 	if patch.Instructions != nil {
 		p.Instructions = *patch.Instructions

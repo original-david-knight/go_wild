@@ -202,6 +202,29 @@ func (s *Service) postByID(ctx context.Context, db gowild_data.Database, id stri
 	return post, p, nil
 }
 
+// GuardPost locks the post and its conversation for the enclosing transaction.
+// All post edits and replies acquire the same database lock before reading or
+// inserting. Compound consumers must use a transaction-bound service and hold
+// this guard while checking a thread and committing anything based on it.
+func (s *Service) GuardPost(ctx context.Context, id string) (*Post, *Project, error) {
+	db, err := s.database()
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.guardPost(ctx, db, id)
+}
+
+func (s *Service) guardPost(ctx context.Context, db gowild_data.Database, id string) (*Post, *Project, error) {
+	locked, err := gowild_data.LockRow(ctx, db, Post{}, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !locked {
+		return nil, nil, fmt.Errorf("%w: post %s", ErrNotFound, id)
+	}
+	return s.postByID(ctx, db, id)
+}
+
 // UpdatePost edits a post: the author or the owner, and only the owner pins.
 func (s *Service) UpdatePost(ctx context.Context, id, actor string, patch PostPatch) (*Post, error) {
 	db, err := s.database()
@@ -210,37 +233,45 @@ func (s *Service) UpdatePost(ctx context.Context, id, actor string, patch PostPa
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	post, p, err := s.postByID(ctx, db, id)
+	var post *Post
+	err = db.RunInTransaction(ctx, func(tx gowild_data.Database) error {
+		var p *Project
+		post, p, err = s.guardPost(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if actor != ActorOwner && actor != post.Author {
+			return forbiddenf("only %s or the owner edits this post", post.Author)
+		}
+		if patch.Pinned != nil {
+			if actor != ActorOwner {
+				return forbiddenf("only the owner pins")
+			}
+			post.Pinned = *patch.Pinned
+		}
+		if patch.Title != nil {
+			if strings.TrimSpace(*patch.Title) == "" {
+				return validationf("post title is required")
+			}
+			post.Title = strings.TrimSpace(*patch.Title)
+		}
+		if patch.Body != nil {
+			post.Body = strings.TrimSpace(*patch.Body)
+			post.Mentions = joinMentions(ExtractMentions(post.Body))
+		}
+		post.UpdatedAt = s.Now()
+		if err := tx.Table(Post{}).Update(ctx, post); err != nil {
+			return err
+		}
+		if patch.Body != nil {
+			return s.syncMentions(ctx, tx, post.Body, RoomPost, post.ID, p.ID, "post", post.ID, actor, post.UpdatedAt)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if actor != ActorOwner && actor != post.Author {
-		return nil, forbiddenf("only %s or the owner edits this post", post.Author)
-	}
-	if patch.Pinned != nil {
-		if actor != ActorOwner {
-			return nil, forbiddenf("only the owner pins")
-		}
-		post.Pinned = *patch.Pinned
-	}
-	if patch.Title != nil {
-		if strings.TrimSpace(*patch.Title) == "" {
-			return nil, validationf("post title is required")
-		}
-		post.Title = strings.TrimSpace(*patch.Title)
-	}
 	if patch.Body != nil {
-		post.Body = strings.TrimSpace(*patch.Body)
-		post.Mentions = joinMentions(ExtractMentions(post.Body))
-	}
-	post.UpdatedAt = s.Now()
-	if err := db.Table(Post{}).Update(ctx, post); err != nil {
-		return nil, err
-	}
-	if patch.Body != nil {
-		if err := s.syncMentions(ctx, db, post.Body, RoomPost, post.ID, p.ID, "post", post.ID, actor, post.UpdatedAt); err != nil {
-			return nil, err
-		}
 		s.wake()
 	}
 	return post, nil
@@ -255,7 +286,9 @@ func (s *Service) PostReplies(ctx context.Context, postID string) ([]*Comment, e
 	return s.comments(ctx, db, TargetPost, postID)
 }
 
-// ReplyToPost appends to a post's thread.
+// ReplyToPost appends a reply and updates the conversation atomically. The
+// post guard prevents cross-process edits or decisions from observing a reply
+// before its enclosing conversation update commits.
 func (s *Service) ReplyToPost(ctx context.Context, postID, author, body string) (*Comment, error) {
 	db, err := s.database()
 	if err != nil {
@@ -263,17 +296,21 @@ func (s *Service) ReplyToPost(ctx context.Context, postID, author, body string) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	post, p, err := s.postByID(ctx, db, postID)
+	var c *Comment
+	err = db.RunInTransaction(ctx, func(tx gowild_data.Database) error {
+		post, p, err := s.guardPost(ctx, tx, postID)
+		if err != nil {
+			return err
+		}
+		c, err = s.addComment(ctx, tx, TargetPost, post.ID, p.ID, author, body)
+		if err != nil {
+			return err
+		}
+		post.ReplyCount++
+		post.LastReplyAt = c.CreatedAt
+		return tx.Table(Post{}).Update(ctx, post)
+	})
 	if err != nil {
-		return nil, err
-	}
-	c, err := s.addComment(ctx, db, TargetPost, post.ID, p.ID, author, body)
-	if err != nil {
-		return nil, err
-	}
-	post.ReplyCount++
-	post.LastReplyAt = c.CreatedAt
-	if err := db.Table(Post{}).Update(ctx, post); err != nil {
 		return nil, err
 	}
 	s.wake()
