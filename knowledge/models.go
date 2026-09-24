@@ -47,6 +47,12 @@ type Source struct {
 	Enabled      bool           `json:"enabled"`
 	BackfillDays int            `json:"backfill_days"`
 	Settings     map[string]any `json:"settings"`
+	// Catalog is what the importer can pull (channels, DMs, labels), as it
+	// last reported. Include and IncludeKinds are the owner's choice from
+	// it: entries named by ID, or every entry of a kind ("im" for all DMs).
+	Catalog      []CatalogEntry `json:"catalog"`
+	Include      []string       `json:"include"`
+	IncludeKinds []string       `json:"include_kinds"`
 	Cursor       string         `json:"cursor"`
 	LastSyncAt   time.Time      `json:"last_sync_at,omitzero"`
 	LastError    string         `json:"last_error"`
@@ -55,6 +61,30 @@ type Source struct {
 }
 
 func (Source) TableName() string { return "kb_sources" }
+
+// CatalogEntry is one thing a source can import from: a Slack channel or
+// DM, a mail label, a feed.
+type CatalogEntry struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// Selected reports whether the owner's choice includes a catalog entry.
+func (s *Source) Selected(id, kind string) bool {
+	for _, k := range s.IncludeKinds {
+		if k == kind {
+			return true
+		}
+	}
+	for _, i := range s.Include {
+		if i == id {
+			return true
+		}
+	}
+	return false
+}
 
 // Participant is someone on an item, named by an alias ("email:a@b.com",
 // "slack:T01/U02") so entities can claim them across sources.
@@ -90,8 +120,12 @@ type Item struct {
 	Metadata     map[string]any `json:"metadata"`
 	ContentHash  string         `json:"content_hash"`
 	ExtractedAt  time.Time      `json:"extracted_at,omitzero"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	// The extraction lease: which extractor holds the item and until when,
+	// so two idle workers never mine the same item at once.
+	ExtractLeaseBy    string    `json:"-"`
+	ExtractLeaseUntil time.Time `json:"-"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 func (Item) TableName() string { return "kb_items" }

@@ -110,14 +110,15 @@ func (s *Service) EmbedPending(ctx context.Context, db data.Database, batch int)
 
 // Status summarizes the knowledge base.
 type Status struct {
-	Items            int  `json:"items"`
-	Facts            int  `json:"facts"`
-	Notes            int  `json:"notes"`
-	Entities         int  `json:"entities"`
-	Sources          int  `json:"sources"`
-	PendingEmbedding int  `json:"pending_embedding"`
-	FailedEmbedding  int  `json:"failed_embedding"`
-	Semantic         bool `json:"semantic"`
+	Items             int  `json:"items"`
+	Facts             int  `json:"facts"`
+	Notes             int  `json:"notes"`
+	Entities          int  `json:"entities"`
+	Sources           int  `json:"sources"`
+	PendingEmbedding  int  `json:"pending_embedding"`
+	FailedEmbedding   int  `json:"failed_embedding"`
+	PendingExtraction int  `json:"pending_extraction"`
+	Semantic          bool `json:"semantic"`
 }
 
 // GetStatus counts records and embedding progress.
@@ -164,6 +165,9 @@ func (s *Service) GetStatus(ctx context.Context, db data.Database) (*Status, err
 		return nil, err
 	}
 	if err := exec.QueryRowContext(ctx, `SELECT count(*) FROM kb_sources`).Scan(&st.Sources); err != nil {
+		return nil, err
+	}
+	if st.PendingExtraction, err = s.pendingExtractionCount(ctx, db); err != nil {
 		return nil, err
 	}
 	return st, nil

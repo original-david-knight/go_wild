@@ -29,6 +29,8 @@ type SourceInput struct {
 	Enabled      *bool           `json:"enabled,omitempty"`
 	BackfillDays *int            `json:"backfill_days,omitempty"`
 	Settings     *map[string]any `json:"settings,omitempty"`
+	Include      *[]string       `json:"include,omitempty"`
+	IncludeKinds *[]string       `json:"include_kinds,omitempty"`
 	Cursor       *string         `json:"cursor,omitempty"`
 }
 
@@ -100,6 +102,15 @@ func (s *Service) PutSource(ctx context.Context, db data.Database, actor Actor, 
 		}
 		src.Settings = *in.Settings
 	}
+	if in.Include != nil {
+		if len(*in.Include) > 5000 {
+			return nil, invalidf("include lists at most 5000 entries")
+		}
+		src.Include = cleanList(*in.Include)
+	}
+	if in.IncludeKinds != nil {
+		src.IncludeKinds = cleanList(*in.IncludeKinds)
+	}
 	if in.Cursor != nil {
 		src.Cursor = *in.Cursor
 	}
@@ -110,7 +121,37 @@ func (s *Service) PutSource(ctx context.Context, db data.Database, actor Actor, 
 	return s.sourceView(ctx, db, src)
 }
 
+func cleanList(in []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, v := range in {
+		v = strings.TrimSpace(v)
+		if v != "" && !seen[v] && len(v) <= 200 {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// fill replaces nil lists read back from the database with empty ones.
+func (src *Source) fill() {
+	if src.Catalog == nil {
+		src.Catalog = []CatalogEntry{}
+	}
+	if src.Include == nil {
+		src.Include = []string{}
+	}
+	if src.IncludeKinds == nil {
+		src.IncludeKinds = []string{}
+	}
+	if src.Settings == nil {
+		src.Settings = map[string]any{}
+	}
+}
+
 func (s *Service) sourceView(ctx context.Context, db data.Database, src *Source) (*SourceView, error) {
+	src.fill()
 	counts, err := itemCounts(ctx, db)
 	if err != nil {
 		return nil, err
@@ -164,6 +205,7 @@ func (s *Service) ListSources(ctx context.Context, db data.Database) ([]SourceVi
 	}
 	out := make([]SourceView, 0, len(rows))
 	for _, r := range rows {
+		r.fill()
 		out = append(out, SourceView{Source: *r, ItemCount: counts[r.ID]})
 	}
 	return out, nil
@@ -221,6 +263,9 @@ type IngestBatch struct {
 	Deletes []string     `json:"deletes"`
 	Cursor  *string      `json:"cursor,omitempty"`
 	Error   *string      `json:"error,omitempty"`
+	// Catalog, when present, replaces the source's catalog: what the
+	// importer found it could pull, for the owner to choose from.
+	Catalog *[]CatalogEntry `json:"catalog,omitempty"`
 }
 
 // IngestResult counts what a push changed.
@@ -317,6 +362,12 @@ func (s *Service) Ingest(ctx context.Context, db data.Database, actor Actor, sou
 	now := s.clock()
 	if batch.Cursor != nil {
 		src.Cursor = *batch.Cursor
+	}
+	if batch.Catalog != nil {
+		if len(*batch.Catalog) > 5000 {
+			return nil, invalidf("a catalog lists at most 5000 entries")
+		}
+		src.Catalog = *batch.Catalog
 	}
 	if batch.Error != nil && *batch.Error != "" {
 		src.LastError = truncateRunes(*batch.Error, 2000)

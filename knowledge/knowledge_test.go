@@ -390,3 +390,58 @@ func TestSemanticSearch(t *testing.T) {
 		}
 	})
 }
+
+func TestCatalogAndExtraction(t *testing.T) {
+	eachBackend(t, func(t *testing.T, db data.Database) {
+		ctx := context.Background()
+		s := New()
+		setupSource(t, s, db, "slack:acme")
+		cat := []CatalogEntry{{ID: "C1", Name: "general", Kind: "channel"}, {ID: "D1", Name: "Alice", Kind: "im"}}
+		if _, err := s.Ingest(ctx, db, Agent("desk"), "slack:acme", IngestBatch{Catalog: &cat, Items: []IngestItem{
+			{ExternalID: "C1/2026-09-01", Kind: "channel_day", Title: "#general", Body: "hello", OccurredAt: t0},
+			{ExternalID: "C1/2026-09-02", Kind: "channel_day", Title: "#general", Body: "again", OccurredAt: t0.Add(24 * time.Hour)},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		src, err := s.PutSource(ctx, db, Owner, "slack:acme", SourceInput{Include: &[]string{"C1"}, IncludeKinds: &[]string{"im"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(src.Catalog) != 2 || !src.Selected("C1", "channel") || !src.Selected("D9", "im") || src.Selected("C2", "channel") {
+			t.Fatalf("selection = %+v", src.Source)
+		}
+		pending, err := s.PendingExtraction(ctx, db, "", 10)
+		if err != nil || len(pending) != 2 || pending[0].ExternalID != "C1/2026-09-02" {
+			t.Fatalf("pending = %d %v", len(pending), err)
+		}
+		n, err := s.MarkExtracted(ctx, db, Agent("fable"), []ExtractedMark{{pending[0].ID, pending[0].ContentHash}, {pending[1].ID, "stale"}})
+		if err != nil || n != 1 {
+			t.Fatalf("marked %d, %v", n, err)
+		}
+		// Leases keep two extractors off the same item.
+		first, err := s.ClaimExtraction(ctx, db, Agent("fable"), "", 5, time.Minute)
+		if err != nil || len(first) != 1 {
+			t.Fatalf("first claim = %d, %v", len(first), err)
+		}
+		if second, err := s.ClaimExtraction(ctx, db, Agent("opus"), "", 5, time.Minute); err != nil || len(second) != 0 {
+			t.Fatalf("second claim = %d, %v; want nothing while leased", len(second), err)
+		}
+		later := New(WithClock(func() time.Time { return time.Now().Add(2 * time.Minute) }))
+		if again, err := later.ClaimExtraction(ctx, db, Agent("opus"), "", 5, time.Minute); err != nil || len(again) != 1 {
+			t.Fatalf("claim after lapse = %d, %v", len(again), err)
+		}
+		st, _ := s.GetStatus(ctx, db)
+		if st.PendingExtraction != 1 {
+			t.Fatalf("pending extraction = %d", st.PendingExtraction)
+		}
+		// A changed item needs mining again.
+		if _, err := s.Ingest(ctx, db, Agent("desk"), "slack:acme", IngestBatch{Items: []IngestItem{
+			{ExternalID: "C1/2026-09-02", Kind: "channel_day", Title: "#general", Body: "again, edited", OccurredAt: t0.Add(24 * time.Hour)},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		if st, _ = s.GetStatus(ctx, db); st.PendingExtraction != 2 {
+			t.Fatalf("pending after edit = %d", st.PendingExtraction)
+		}
+	})
+}
