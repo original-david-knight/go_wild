@@ -24,6 +24,7 @@ Libraries (repo root):
 | `agentic_loop/` | Event-streaming LLM loop with tool auto-discovery and MCP support |
 | `data/` | PostgreSQL/SQLite abstraction with auto-registered tables and user-scoped data |
 | `crypto/` | Wallet/key/signing/encryption utilities |
+| `knowledge/` | Personal knowledge base: imported items, facts, notes, entities; hybrid full-text + vector search |
 | `knowledge_graph/` | Persistent graph + traversal/search tools |
 | `agent_net/` | Agent-net protocol library (consumed by `apps/agent_net_server` and `apps/agent_net_admin`) |
 | `polymarket/` | Polymarket CLOB/Gamma/Data API client and order-signing utilities |

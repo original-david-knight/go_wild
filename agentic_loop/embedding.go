@@ -103,3 +103,63 @@ func CosineSimilarity(a, b []float32) float32 {
 
 	return dot / (float32(math.Sqrt(float64(normA))) * float32(math.Sqrt(float64(normB))))
 }
+
+// RetrievalEmbedder embeds documents and queries for retrieval with Gemini,
+// using the retrieval task types and a reduced output width. Gemini
+// normalizes only full-width output, so callers comparing by cosine should
+// normalize these vectors.
+type RetrievalEmbedder struct {
+	client     *genai.Client
+	model      string
+	dimensions int32
+}
+
+// NewRetrievalEmbedder builds a RetrievalEmbedder. apiKey must be set; model
+// empty means DefaultEmbeddingModel.
+func NewRetrievalEmbedder(ctx context.Context, apiKey, model string, dimensions int) (*RetrievalEmbedder, error) {
+	if apiKey == "" {
+		return nil, fmt.Errorf("retrieval embedder: no API key")
+	}
+	if model == "" {
+		model = DefaultEmbeddingModel
+	}
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: apiKey, Backend: genai.BackendGeminiAPI})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
+	}
+	return &RetrievalEmbedder{client: client, model: model, dimensions: int32(dimensions)}, nil
+}
+
+func (e *RetrievalEmbedder) embed(ctx context.Context, texts []string, task string) ([][]float32, error) {
+	contents := make([]*genai.Content, len(texts))
+	for i, t := range texts {
+		contents[i] = genai.NewContentFromText(t, genai.RoleUser)
+	}
+	dims := e.dimensions
+	result, err := e.client.Models.EmbedContent(ctx, e.model, contents, &genai.EmbedContentConfig{TaskType: task, OutputDimensionality: &dims})
+	if err != nil {
+		return nil, fmt.Errorf("failed to embed content: %w", err)
+	}
+	if len(result.Embeddings) != len(texts) {
+		return nil, fmt.Errorf("embedding returned %d vectors for %d texts", len(result.Embeddings), len(texts))
+	}
+	out := make([][]float32, len(texts))
+	for i, emb := range result.Embeddings {
+		out[i] = emb.Values
+	}
+	return out, nil
+}
+
+// EmbedDocuments embeds texts to be searched.
+func (e *RetrievalEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
+	return e.embed(ctx, texts, "RETRIEVAL_DOCUMENT")
+}
+
+// EmbedQuery embeds a search query.
+func (e *RetrievalEmbedder) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
+	out, err := e.embed(ctx, []string{text}, "RETRIEVAL_QUERY")
+	if err != nil {
+		return nil, err
+	}
+	return out[0], nil
+}
