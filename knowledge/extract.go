@@ -165,3 +165,73 @@ func (s *Service) pendingExtractionCount(ctx context.Context, db data.Database) 
 	err = exec.QueryRowContext(ctx, rebind(backend, `SELECT count(*) FROM kb_items WHERE extracted_at < ?`), cut).Scan(&n)
 	return n, err
 }
+
+// itemTimeArg formats a time for a raw comparison against a kb_items time
+// column, which SQLite stores as RFC 3339 text.
+func itemTimeArg(backend data.Backend, t time.Time) any {
+	if backend == data.BackendSqlite {
+		return t.UTC().Format(time.RFC3339)
+	}
+	return t.UTC()
+}
+
+// RequeueExtraction puts the items that occurred in [since, until) back in
+// the extraction queue, whether mined or leased, so a worker mines them
+// again. The owner uses it after changing what extraction is asked for. A
+// zero until means no upper bound. It reports how many items changed.
+func (s *Service) RequeueExtraction(ctx context.Context, db data.Database, actor Actor, since, until time.Time) (int, error) {
+	if !actor.owner() {
+		return 0, ErrForbidden
+	}
+	if since.IsZero() {
+		return 0, invalidf("since is required")
+	}
+	if !until.IsZero() && !until.After(since) {
+		return 0, invalidf("until must be after since")
+	}
+	exec, backend, err := data.Raw(db)
+	if err != nil {
+		return 0, err
+	}
+	// Mined items return to the queue; a pending item under lease loses the
+	// lease, so it is claimable at once. A pending, unleased item is already
+	// where it should be and does not count.
+	query := `UPDATE kb_items SET extracted_at = ?, extract_lease_by = '', extract_lease_until = ? WHERE occurred_at >= ? AND (extracted_at >= ? OR extract_lease_until >= ?)`
+	zero := itemTimeArg(backend, time.Time{})
+	args := []any{zero, zero, itemTimeArg(backend, since), itemTimeArg(backend, extractedCut), itemTimeArg(backend, s.clock())}
+	if !until.IsZero() {
+		query += ` AND occurred_at < ?`
+		args = append(args, itemTimeArg(backend, until))
+	}
+	res, err := exec.ExecContext(ctx, rebind(backend, query), args...)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}
+
+// SkipExtraction marks every pending item that occurred before the given
+// time as extracted without mining it, so the queue holds only what the
+// owner wants distilled. An item that changes later is pending again. It
+// reports how many items it marked.
+func (s *Service) SkipExtraction(ctx context.Context, db data.Database, actor Actor, before time.Time) (int, error) {
+	if !actor.owner() {
+		return 0, ErrForbidden
+	}
+	if before.IsZero() {
+		return 0, invalidf("before is required")
+	}
+	exec, backend, err := data.Raw(db)
+	if err != nil {
+		return 0, err
+	}
+	query := `UPDATE kb_items SET extracted_at = ?, extract_lease_by = '', extract_lease_until = ? WHERE occurred_at < ? AND extracted_at < ?`
+	args := []any{itemTimeArg(backend, s.clock()), itemTimeArg(backend, time.Time{}), itemTimeArg(backend, before), itemTimeArg(backend, extractedCut)}
+	res, err := exec.ExecContext(ctx, rebind(backend, query), args...)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}

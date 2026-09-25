@@ -42,11 +42,26 @@ func factRef(f *Fact) FactRef {
 }
 
 // FactView is a fact with what it is about, where it came from and its tags.
+// AsOf is the date the fact speaks from: valid_from when the author set it,
+// else the earliest cited item's date. A fact with neither has no AsOf.
 type FactView struct {
 	Fact
+	AsOf    time.Time   `json:"as_of,omitzero"`
 	About   []EntityRef `json:"about"`
 	Sources []ItemRef   `json:"sources"`
 	Tags    []string    `json:"tags"`
+}
+
+// factAsOf is the date a fact speaks from, given its cited items newest
+// first.
+func factAsOf(f *Fact, sources []ItemRef) time.Time {
+	if !f.ValidFrom.IsZero() {
+		return f.ValidFrom
+	}
+	if len(sources) > 0 {
+		return sources[len(sources)-1].OccurredAt
+	}
+	return time.Time{}
 }
 
 // CreateFact records a fact. The owner's facts are verified; an agent's are
@@ -258,7 +273,15 @@ func (s *Service) reindexFact(ctx context.Context, db data.Database, f *Fact) er
 	if err != nil {
 		return err
 	}
-	return s.putSearch(ctx, db, factSearchRow(f, tags))
+	sources, err := linksFrom(ctx, db, f.ID, RelSource)
+	if err != nil {
+		return err
+	}
+	refs, err := itemRefs(ctx, db, sources)
+	if err != nil {
+		return err
+	}
+	return s.putSearch(ctx, db, factSearchRow(f, tags, factAsOf(f, refs)))
 }
 
 func (s *Service) factView(ctx context.Context, db data.Database, f *Fact) (*FactView, error) {
@@ -277,6 +300,7 @@ func (s *Service) factView(ctx context.Context, db data.Database, f *Fact) (*Fac
 	if v.Sources, err = itemRefs(ctx, db, sources); err != nil {
 		return nil, err
 	}
+	v.AsOf = factAsOf(f, v.Sources)
 	if v.Tags, err = tagsOf(ctx, db, f.ID); err != nil {
 		return nil, err
 	}

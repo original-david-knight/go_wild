@@ -3,6 +3,7 @@ package gowild_knowledge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -442,6 +443,110 @@ func TestCatalogAndExtraction(t *testing.T) {
 		}
 		if st, _ = s.GetStatus(ctx, db); st.PendingExtraction != 2 {
 			t.Fatalf("pending after edit = %d", st.PendingExtraction)
+		}
+	})
+}
+
+func TestExtractionQueueRequeueAndSkip(t *testing.T) {
+	eachBackend(t, func(t *testing.T, db data.Database) {
+		ctx := context.Background()
+		s := New()
+		setupSource(t, s, db, "gmail:queue")
+		var items []IngestItem
+		for i, at := range []time.Time{t0.AddDate(0, 0, -40), t0.AddDate(0, 0, -20), t0} {
+			items = append(items, email(fmt.Sprintf("q%d", i), "Mail", "body", at, "email:a@example.com"))
+		}
+		if _, err := s.Ingest(ctx, db, Agent("desk"), "gmail:queue", IngestBatch{Items: items}); err != nil {
+			t.Fatal(err)
+		}
+		// Only the owner bounds the queue.
+		if _, err := s.SkipExtraction(ctx, db, Agent("fable"), t0); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("skip by an agent = %v", err)
+		}
+		if _, err := s.RequeueExtraction(ctx, db, Agent("fable"), t0, time.Time{}); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("requeue by an agent = %v", err)
+		}
+		if _, err := s.RequeueExtraction(ctx, db, Owner, time.Time{}, t0); err == nil {
+			t.Fatal("requeue without since was accepted")
+		}
+		// Skipping the month before last takes the oldest item out, once.
+		month := t0.AddDate(0, 0, -30)
+		if n, err := s.SkipExtraction(ctx, db, Owner, month); err != nil || n != 1 {
+			t.Fatalf("skipped %d, %v", n, err)
+		}
+		if n, err := s.SkipExtraction(ctx, db, Owner, month); err != nil || n != 0 {
+			t.Fatalf("second skip = %d, %v", n, err)
+		}
+		pending, err := s.PendingExtraction(ctx, db, "", 10)
+		if err != nil || len(pending) != 2 || pending[0].ExternalID != "q2" || pending[1].ExternalID != "q1" {
+			t.Fatalf("pending after skip = %v, %v", pending, err)
+		}
+		// Once mined (one of them leased, too), the last month comes back on
+		// a requeue; the skipped item stays out, and the lease is gone.
+		if _, err := s.ClaimExtraction(ctx, db, Agent("opus"), "", 1, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		marks := []ExtractedMark{}
+		for _, it := range pending {
+			marks = append(marks, ExtractedMark{it.ID, it.ContentHash})
+		}
+		if n, err := s.MarkExtracted(ctx, db, Agent("fable"), marks); err != nil || n != 2 {
+			t.Fatalf("marked %d, %v", n, err)
+		}
+		if n, err := s.RequeueExtraction(ctx, db, Owner, month, time.Time{}); err != nil || n != 2 {
+			t.Fatalf("requeued %d, %v", n, err)
+		}
+		if st, _ := s.GetStatus(ctx, db); st.PendingExtraction != 2 {
+			t.Fatalf("pending after requeue = %d", st.PendingExtraction)
+		}
+		if claimed, err := s.ClaimExtraction(ctx, db, Agent("fable"), "", 5, time.Hour); err != nil || len(claimed) != 2 {
+			t.Fatalf("claim after requeue = %d, %v", len(claimed), err)
+		}
+		// A bounded requeue frees the leased item inside the bound (the one
+		// outside it stays leased); an unleased pending item would not count.
+		if n, err := s.RequeueExtraction(ctx, db, Owner, month, t0.AddDate(0, 0, -10)); err != nil || n != 1 {
+			t.Fatalf("bounded requeue = %d, %v", n, err)
+		}
+		if claimed, err := s.ClaimExtraction(ctx, db, Agent("opus"), "", 5, time.Hour); err != nil || len(claimed) != 1 || claimed[0].ExternalID != "q1" {
+			t.Fatalf("claim after the bounded requeue = %v, %v", claimed, err)
+		}
+	})
+}
+
+func TestFactAsOfIsTheDateItSpeaksFrom(t *testing.T) {
+	eachBackend(t, func(t *testing.T, db data.Database) {
+		ctx := context.Background()
+		s := New()
+		setupSource(t, s, db, "gmail:asof")
+		old, recent := t0.AddDate(0, 0, -90), t0
+		if _, err := s.Ingest(ctx, db, Agent("desk"), "gmail:asof", IngestBatch{Items: []IngestItem{
+			email("a1", "Old", "body", old, "email:a@example.com"), email("a2", "New", "body", recent, "email:a@example.com"),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		a1, a2 := ItemID("gmail:asof", "a1"), ItemID("gmail:asof", "a2")
+		f, err := s.CreateFact(ctx, db, Agent("fable"), FactInput{Text: ptr("Alice moved to Seattle"), Sources: &[]string{a2, a1}})
+		if err != nil || !f.AsOf.Equal(old) {
+			t.Fatalf("as_of = %v, %v; want the earliest source %v", f.AsOf, err, old)
+		}
+		got, _ := s.GetFact(ctx, db, f.ID)
+		if !got.AsOf.Equal(old) {
+			t.Fatalf("read back as_of = %v", got.AsOf)
+		}
+		// Search dates the fact by that day, not by when it was recorded.
+		hits, err := s.Search(ctx, db, SearchQuery{Kinds: []string{KindFact}, Until: t0.AddDate(0, 0, -1), Limit: 10})
+		if err != nil || len(hits.Hits) != 1 || hits.Hits[0].ID != f.ID || !hits.Hits[0].OccurredAt.Equal(old) {
+			t.Fatalf("search by the fact's day = %+v, %v", hits, err)
+		}
+		// valid_from wins over the sources.
+		from := t0.AddDate(0, 0, -5)
+		if f, err = s.UpdateFact(ctx, db, Agent("fable"), f.ID, FactInput{ValidFrom: &from}); err != nil || !f.AsOf.Equal(from) {
+			t.Fatalf("as_of with valid_from = %v, %v", f.AsOf, err)
+		}
+		// A fact with neither has no as_of.
+		bare, err := s.CreateFact(ctx, db, Agent("fable"), FactInput{Text: ptr("Bare")})
+		if err != nil || !bare.AsOf.IsZero() {
+			t.Fatalf("bare as_of = %v, %v", bare.AsOf, err)
 		}
 	})
 }

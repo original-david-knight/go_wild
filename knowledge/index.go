@@ -133,10 +133,13 @@ func factWeight(f *Fact) float64 {
 	return w
 }
 
-func factSearchRow(f *Fact, tags []string) searchRow {
+// factSearchRow dates a fact by when it speaks from (asOf), so a fact
+// mined from old mail sorts with that mail and not with the day it was
+// mined; a fact with no date of its own sorts by when it was recorded.
+func factSearchRow(f *Fact, tags []string, asOf time.Time) searchRow {
 	occurred := f.CreatedAt
-	if !f.ValidFrom.IsZero() {
-		occurred = f.ValidFrom
+	if !asOf.IsZero() {
+		occurred = asOf
 	}
 	return searchRow{
 		ID: f.ID, Kind: KindFact, Context: f.Context, OccurredAt: occurred,
