@@ -75,7 +75,10 @@ func (s *Service) CreateEntity(ctx context.Context, db data.Database, actor Acto
 	return out, err
 }
 
-// UpdateEntity edits an entity within the write fence.
+// UpdateEntity edits an entity within the write fence. An entity the
+// actor may not modify still takes an edit that only adds associations
+// (aliases or tags): an agent that sees the owner's Slack messages may
+// record that they are his, but not rename or resummarise him.
 func (s *Service) UpdateEntity(ctx context.Context, db data.Database, actor Actor, id string, in EntityInput) (*EntityView, error) {
 	var out *EntityView
 	err := transact(ctx, db, func(tx data.Database) error {
@@ -84,7 +87,13 @@ func (s *Service) UpdateEntity(ctx context.Context, db data.Database, actor Acto
 			return err
 		}
 		if !actor.canModify(e.AuthorKind, false) {
-			return ErrForbidden
+			ok, err := onlyAddsAssociations(ctx, tx, e, in)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return ErrForbidden
+			}
 		}
 		before := slices.Clone(e.Aliases)
 		if err := applyEntity(e, in); err != nil {
@@ -99,6 +108,45 @@ func (s *Service) UpdateEntity(ctx context.Context, db data.Database, actor Acto
 		return err
 	})
 	return out, err
+}
+
+// onlyAddsAssociations reports whether an edit touches nothing but the
+// entity's aliases and tags, and removes none of them.
+func onlyAddsAssociations(ctx context.Context, db data.Database, e *Entity, in EntityInput) (bool, error) {
+	if in.Kind != nil || in.Name != nil || in.Summary != nil || in.Context != nil {
+		return false, nil
+	}
+	if in.Aliases != nil {
+		var want []string
+		for _, a := range *in.Aliases {
+			n, err := NormalizeAlias(a)
+			if err != nil {
+				return false, err
+			}
+			want = append(want, n)
+		}
+		for _, have := range e.Aliases {
+			if !slices.Contains(want, have) {
+				return false, nil
+			}
+		}
+	}
+	if in.Tags != nil {
+		want, err := normTags(*in.Tags)
+		if err != nil {
+			return false, err
+		}
+		have, err := tagsOf(ctx, db, e.ID)
+		if err != nil {
+			return false, err
+		}
+		for _, t := range have {
+			if !slices.Contains(want, t) {
+				return false, nil
+			}
+		}
+	}
+	return true, nil
 }
 
 func applyEntity(e *Entity, in EntityInput) error {

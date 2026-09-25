@@ -550,3 +550,39 @@ func TestFactAsOfIsTheDateItSpeaksFrom(t *testing.T) {
 		}
 	})
 }
+
+func TestAgentsMayAddAssociationsToTheOwnersEntities(t *testing.T) {
+	eachBackend(t, func(t *testing.T, db data.Database) {
+		ctx := context.Background()
+		s := New()
+		me, err := s.CreateEntity(ctx, db, Owner, EntityInput{Name: ptr("David Knight"), Aliases: &[]string{"email:david@example.com"}, Tags: &[]string{"me"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent := Agent("opus")
+		// Renaming, resummarising or dropping an alias stays the owner's.
+		for name, in := range map[string]EntityInput{
+			"rename":       {Name: ptr("Dave")},
+			"summary":      {Summary: ptr("someone else")},
+			"drop alias":   {Aliases: &[]string{"slack:t1/u1"}},
+			"drop tag":     {Tags: &[]string{}},
+			"alias + name": {Name: ptr("Dave"), Aliases: &[]string{"email:david@example.com", "slack:t1/u1"}},
+		} {
+			if _, err := s.UpdateEntity(ctx, db, agent, me.ID, in); !errors.Is(err, ErrForbidden) {
+				t.Fatalf("%s by an agent = %v, want forbidden", name, err)
+			}
+		}
+		// Adding an alias or a tag is an association any agent may record.
+		v, err := s.UpdateEntity(ctx, db, agent, me.ID, EntityInput{Aliases: &[]string{"email:david@example.com", "slack:t1/u1"}, Tags: &[]string{"me", "fluxon"}})
+		if err != nil || !slices.Contains(v.Aliases, "slack:t1/u1") || !slices.Contains(v.Tags, "fluxon") || v.Name != "David Knight" || v.Author != "owner" {
+			t.Fatalf("adding associations = %+v, %v", v, err)
+		}
+		if ref, _ := entityForAlias(ctx, db, "slack:t1/u1"); ref == nil || ref.ID != me.ID {
+			t.Fatalf("the new alias does not resolve to the owner's entity: %+v", ref)
+		}
+		// A malformed alias is refused as invalid, not as forbidden.
+		if _, err := s.UpdateEntity(ctx, db, agent, me.ID, EntityInput{Aliases: &[]string{"email:david@example.com", "slack:t1/u1", "nonsense"}}); err == nil || errors.Is(err, ErrForbidden) {
+			t.Fatalf("malformed alias = %v", err)
+		}
+	})
+}
