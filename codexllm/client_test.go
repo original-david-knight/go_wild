@@ -837,3 +837,43 @@ func TestGenerate_ArgvCarriesStdinMarker(t *testing.T) {
 		}
 	}
 }
+
+// TestGenerate_NoToolsSwitchesEveryToolOff verifies that NoTools passes every
+// override in NoToolsOverrides, forces the read-only sandbox, and wins over
+// WebSearch: the boundary for prompts built from untrusted text.
+func TestGenerate_NoToolsSwitchesEveryToolOff(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	stageFakeCodexCaptureArgs(t, argsFile)
+
+	c := &Client{Label: "test", NoTools: true, WebSearch: true, SandboxMode: "danger-full-access"}
+	if _, err := c.Generate(context.Background(), "p", ""); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	if got := findFlagValue(args, "-s"); got != "read-only" {
+		t.Fatalf("-s = %q with NoTools, want read-only (argv=%v)", got, args)
+	}
+	overrides := map[string]bool{}
+	for i, a := range args {
+		if a == "-c" && i+1 < len(args) {
+			overrides[args[i+1]] = true
+		}
+	}
+	for _, want := range NoToolsOverrides {
+		if !overrides[want] {
+			t.Fatalf("NoTools did not pass %q (argv=%v)", want, args)
+		}
+	}
+	if overrides["tools.web_search=true"] {
+		t.Fatalf("NoTools let WebSearch enable the web tool (argv=%v)", args)
+	}
+	for _, key := range []string{"features.shell_tool=false", "mcp_servers={}", `web_search="disabled"`} {
+		if !overrides[key] {
+			t.Fatalf("missing %q", key)
+		}
+	}
+}

@@ -59,10 +59,42 @@ type Client struct {
 	// business logic specifically depends on fresh search results (e.g.
 	// deep-research searcher) should set both flags.
 	RequireWebSearchUse bool
-	Timeout             time.Duration // per-call timeout (0 = no limit, uses parent context only)
-	Label               string        // optional label for log lines (e.g. "planner", "synthesizer")
-	Dir                 string        // optional working directory for the codex process ("" = inherit)
-	Env                 []string      // optional extra KEY=VALUE pairs appended to the inherited environment
+	// NoTools runs the model with no tools at all: every tool-bearing
+	// feature off through its config key, no MCP servers, and the sandbox
+	// read-only whatever SandboxMode says. For a prompt built from untrusted
+	// text, this is the boundary: the worst a hostile prompt can do is
+	// answer wrongly. WebSearch is ignored when it is set.
+	NoTools bool
+	Timeout time.Duration // per-call timeout (0 = no limit, uses parent context only)
+	Label   string        // optional label for log lines (e.g. "planner", "synthesizer")
+	Dir     string        // optional working directory for the codex process ("" = inherit)
+	Env     []string      // optional extra KEY=VALUE pairs appended to the inherited environment
+}
+
+// NoToolsOverrides are the config keys that switch off every tool-bearing
+// feature of codex, checked against the codex config reference; the one
+// list to revisit when codex ships a feature. `web_search` is top level and
+// takes a mode; `tools.web_search` is the older key. `mcp_servers={}` drops
+// the user's configured MCP servers for the run.
+var NoToolsOverrides = []string{
+	`web_search="disabled"`,
+	"features.shell_tool=false",
+	"features.unified_exec=false",
+	"features.shell_snapshot=false",
+	"features.browser_use=false",
+	"features.browser_use_external=false",
+	"features.browser_use_full_cdp_access=false",
+	"features.computer_use=false",
+	"features.apps=false",
+	"features.plugins=false",
+	"features.remote_plugin=false",
+	"features.multi_agent=false",
+	"features.hooks=false",
+	"features.memories=false",
+	"tools.web_search=false",
+	"tools.view_image=false",
+	"tools.apps=false",
+	"mcp_servers={}",
 }
 
 // Generate runs `codex exec` with the given prompt and optional system prompt,
@@ -103,7 +135,7 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 	fullPrompt := WrapSystemPrompt(systemPrompt, prompt)
 
 	sandboxMode := strings.TrimSpace(c.SandboxMode)
-	if sandboxMode == "" {
+	if sandboxMode == "" || c.NoTools {
 		sandboxMode = "read-only"
 	}
 
@@ -120,7 +152,11 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 		"--skip-git-repo-check",
 		"--ephemeral",
 	}
-	if c.WebSearch {
+	if c.NoTools {
+		for _, o := range NoToolsOverrides {
+			args = append(args, "-c", o)
+		}
+	} else if c.WebSearch {
 		args = append(args, "-c", "tools.web_search=true")
 	}
 	if c.Profile != "" {
