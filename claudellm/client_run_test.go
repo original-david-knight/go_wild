@@ -241,7 +241,7 @@ exit 3
 	if out := logs.String(); !strings.Contains(out, want.String()) {
 		_, reported, _ := strings.Cut(out, "[job] stderr output: ")
 		reported, _, _ = strings.Cut(reported, "\n[job]")
-		lines := strings.Split(reported, "\n")
+		lines := strings.Split(strings.TrimRight(reported, "\n"), "\n")
 		t.Errorf("stderr output holds %d lines, the last %q; want 2000 lines", len(lines), lines[len(lines)-1])
 	}
 }
