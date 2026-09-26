@@ -346,7 +346,6 @@ func (s *Service) GetNeighbors(ctx context.Context, nodeID string, opts Traversa
 		if len(opts.RelationTypes) > 0 && !contains(opts.RelationTypes, edge.RelationType) {
 			continue
 		}
-		result.Edges = append(result.Edges, edge)
 		node, err := s.GetNode(ctx, edge.TargetNodeID)
 		if err != nil {
 			continue
@@ -357,6 +356,7 @@ func (s *Service) GetNeighbors(ctx context.Context, nodeID string, opts Traversa
 		if len(opts.NodeTypes) > 0 && !contains(opts.NodeTypes, node.Type) {
 			continue
 		}
+		result.Edges = append(result.Edges, edge)
 		result.Nodes = append(result.Nodes, *node)
 	}
 
@@ -373,7 +373,6 @@ func (s *Service) GetNeighbors(ctx context.Context, nodeID string, opts Traversa
 			if len(opts.RelationTypes) > 0 && !contains(opts.RelationTypes, edge.RelationType) {
 				continue
 			}
-			result.Edges = append(result.Edges, edge)
 			node, err := s.GetNode(ctx, edge.SourceNodeID)
 			if err != nil {
 				continue
@@ -384,6 +383,7 @@ func (s *Service) GetNeighbors(ctx context.Context, nodeID string, opts Traversa
 			if len(opts.NodeTypes) > 0 && !contains(opts.NodeTypes, node.Type) {
 				continue
 			}
+			result.Edges = append(result.Edges, edge)
 			result.Nodes = append(result.Nodes, *node)
 		}
 	}
@@ -521,9 +521,7 @@ func (s *Service) FindPath(ctx context.Context, startID, endID string, opts Trav
 				newPath := append([]string{}, current.path...)
 				newPath = append(newPath, neighbor.ID)
 				newEdges := append([]Edge{}, current.edges...)
-				if i < len(neighbors.Edges) {
-					newEdges = append(newEdges, neighbors.Edges[i])
-				}
+				newEdges = append(newEdges, neighbors.Edges[i])
 				queue = append(queue, pathState{neighbor.ID, newPath, newEdges, current.depth + 1})
 			}
 		}
