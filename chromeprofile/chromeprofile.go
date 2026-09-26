@@ -27,6 +27,10 @@ import (
 // matched are the owner's Chrome profiles.
 const Browser = "/usr/bin/google-chrome-stable"
 
+// browserPath is the executable Open runs: Browser, replaced only by tests so
+// Open can run without launching Chrome.
+var browserPath = Browser
+
 // LocalStatePath is Chrome's profile registry for the invoking user.
 func LocalStatePath() string {
 	home, err := os.UserHomeDir()
@@ -83,7 +87,7 @@ func Find(path, email string) (*Profile, error) {
 // the browser — a service restart must not take the owner's windows down with
 // it. A goroutine reaps the handoff process.
 func Open(profileDir, url string) error {
-	cmd := exec.Command(Browser, "--profile-directory="+profileDir, url)
+	cmd := exec.Command(browserPath, "--profile-directory="+profileDir, url)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return err
