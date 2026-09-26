@@ -132,10 +132,10 @@ func TestApplyMutationsRollsBackOnError(t *testing.T) {
 		{"unknown action", func(string, string) TreeMutation { return TreeMutation{Action: "explode"} }, "unknown mutation action: explode"},
 		{"add under a missing title", func(string, string) TreeMutation {
 			return TreeMutation{Action: MutationAdd, ParentID: "No Such Title", Title: "x"}
-		}, "add mutation: parent No Such Title not found"},
+		}, "under No Such Title: a key result's parent must name an existing objective"},
 		{"add under a missing id", func(string, string) TreeMutation {
 			return TreeMutation{Action: MutationAdd, ParentID: missing, Title: "x"}
-		}, "add mutation: parent " + missing + " not found"},
+		}, "under " + missing + ": a key result's parent must name an existing objective"},
 		{"add under a key result", func(_, kr string) TreeMutation {
 			return TreeMutation{Action: MutationAdd, ParentID: kr, Title: "x"}
 		}, "the tree is two levels"},

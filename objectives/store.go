@@ -99,7 +99,7 @@ func (s *ObjectiveStore) CreateKeyResult(ctx context.Context, objectiveID string
 	}
 	parent, err := s.Get(ctx, objectiveID)
 	if err != nil {
-		return fmt.Errorf("create key result %q: %w", kr.Title, ErrParentNotObjective)
+		return fmt.Errorf("create key result %q under %s: %w", kr.Title, objectiveID, ErrParentNotObjective)
 	}
 	if parent.ParentID != "" {
 		return fmt.Errorf("create key result %q under %s: %w", kr.Title, objectiveID, ErrThirdLevel)
@@ -110,7 +110,7 @@ func (s *ObjectiveStore) CreateKeyResult(ctx context.Context, objectiveID string
 }
 
 // create inserts a node. ID and timestamps are set automatically. It is the
-// shared tail of both public creates and of ApplyMutations, and it enforces
+// shared tail of both public creates, and it enforces
 // nothing: the structure was decided by the caller above it.
 func (s *ObjectiveStore) create(ctx context.Context, obj *Objective) error {
 	now := time.Now().UTC()
@@ -394,18 +394,13 @@ func (s *ObjectiveStore) ApplyMutations(ctx context.Context, mutations []TreeMut
 					Status:      StatusPending,
 					Priority:    m.Priority,
 				}
-				// Calculate depth and inherit CompanyID from parent
-				if parentID != "" {
-					parent, err := txStore.Get(ctx, parentID)
-					if err != nil {
-						return fmt.Errorf("add mutation: parent %s not found: %w", parentID, err)
-					}
-					obj.Depth = parent.Depth + 1
-					if obj.CompanyID == "" {
-						obj.CompanyID = parent.CompanyID
-					}
+				var err error
+				if parentID == "" {
+					err = txStore.CreateObjective(ctx, obj)
+				} else {
+					err = txStore.CreateKeyResult(ctx, parentID, obj)
 				}
-				if err := txStore.create(ctx, obj); err != nil {
+				if err != nil {
 					return fmt.Errorf("add mutation: %w", err)
 				}
 				// Store the generated ID back into the mutation for reference
