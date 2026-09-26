@@ -362,12 +362,7 @@ func (postgresDialect) setFieldFromScan(fv reflect.Value, field fieldMeta, scann
 		if !dest.Valid {
 			return nil
 		}
-		if isPtr {
-			i := dest.Int64
-			fv.Set(reflect.ValueOf(&i))
-		} else {
-			fv.SetInt(dest.Int64)
-		}
+		setScannedInt(fv, dest.Int64)
 
 	case *sql.NullFloat64:
 		if !dest.Valid {
