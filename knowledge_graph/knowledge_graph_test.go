@@ -561,3 +561,39 @@ func TestToolsWrapWithDescriptions(t *testing.T) {
 		}
 	}
 }
+
+// FindPath pairs each neighbour with the edge that reached it, so a
+// neighbour GetNeighbors filters out must not leave its edge behind.
+func TestFindPathSkipsFilteredNeighbourEdge(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	service := NewService(db, "test-user")
+
+	a, _ := service.CreateNode(ctx, "A", NodeTypeEntity, "", nil)
+	b, _ := service.CreateNode(ctx, "B", NodeTypePerson, "", nil)
+	c, _ := service.CreateNode(ctx, "C", NodeTypeEntity, "", nil)
+	ab, _ := service.CreateEdge(ctx, a.ID, b.ID, RelationTypeRelatedTo, nil, 1.0)
+	ac, _ := service.CreateEdge(ctx, a.ID, c.ID, RelationTypeRelatedTo, nil, 1.0)
+
+	result, err := service.FindPath(ctx, a.ID, c.ID, TraversalOptions{MaxDepth: 3, NodeTypes: []string{NodeTypeEntity}})
+	if err != nil {
+		t.Fatalf("type-filtered path: %v", err)
+	}
+	if len(result.Edges) != 1 || result.Edges[0].ID != ac.ID {
+		t.Fatalf("type-filtered path edges = %+v, want only %s (A->C), not %s (A->B)", result.Edges, ac.ID, ab.ID)
+	}
+
+	b.Status = StatusExpired
+	if err := service.UpdateNode(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	result, err = service.FindPath(ctx, a.ID, c.ID, TraversalOptions{MaxDepth: 3})
+	if err != nil {
+		t.Fatalf("path past expired node: %v", err)
+	}
+	if len(result.Edges) != 1 || result.Edges[0].ID != ac.ID {
+		t.Fatalf("path past expired node edges = %+v, want only %s (A->C), not %s (A->B)", result.Edges, ac.ID, ab.ID)
+	}
+}
