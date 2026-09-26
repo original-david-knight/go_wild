@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -93,5 +94,59 @@ func TestUsageReaderPresentsTheToken(t *testing.T) {
 	}
 	if _, err := (UsageReader{CredentialsPath: filepath.Join(dir, "missing"), URL: srv.URL}).Read(context.Background()); err == nil {
 		t.Fatal("missing file read")
+	}
+}
+
+func TestUsageReaderErrorsAndDefaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	creds := filepath.Join(home, ".claude", ".credentials.json")
+	if err := os.WriteFile(creds, []byte(`{"claudeAiOauth":{"accessToken":"tok"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	status, body := http.StatusOK, usageResponse
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	// No CredentialsPath reads ~/.claude/.credentials.json.
+	r := UsageReader{URL: srv.URL, Client: srv.Client()}
+	if u, err := r.Read(context.Background()); err != nil || u.Weekly.Used != 52 {
+		t.Fatalf("default credentials: %v %+v", err, u)
+	}
+
+	status = http.StatusForbidden
+	if _, err := r.Read(context.Background()); err == nil || err.Error() != "claude usage: the OAuth token was refused (HTTP 403)" {
+		t.Errorf("403 err = %v", err)
+	}
+
+	status, body = http.StatusBadGateway, " upstream down \n"
+	if _, err := r.Read(context.Background()); err == nil || err.Error() != "claude usage: HTTP 502: upstream down" {
+		t.Errorf("502 err = %v", err)
+	}
+
+	status, body = http.StatusOK, `{"five_hour":{"utilization":1,"resets_at":"yesterday"},"seven_day":{}}`
+	if _, err := r.Read(context.Background()); err == nil || !strings.Contains(err.Error(), `cannot parse "yesterday"`) {
+		t.Errorf("bad timestamp err = %v", err)
+	}
+
+	if err := os.WriteFile(creds, []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Read(context.Background()); err == nil || err.Error() != "claude usage: "+creds+": unexpected end of JSON input" {
+		t.Errorf("bad credentials err = %v", err)
+	}
+
+	srv.Close()
+	if err := os.WriteFile(creds, []byte(`{"claudeAiOauth":{"accessToken":"tok"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Read(context.Background()); err == nil || !strings.HasPrefix(err.Error(), "claude usage: Get ") {
+		t.Errorf("transport err = %v", err)
 	}
 }
