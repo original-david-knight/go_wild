@@ -48,6 +48,14 @@ func addJitter(d time.Duration) time.Duration {
 	return time.Duration(float64(d) * (0.75 + rand.Float64()*0.5))
 }
 
+// backoff returns a channel that fires after d.
+func (l *AgenticLoop) backoff(d time.Duration) <-chan time.Time {
+	if l.after != nil {
+		return l.after(d)
+	}
+	return time.After(d)
+}
+
 // generateWithRetry wraps GenerateContent with exponential backoff retry.
 // Rate limit errors (429) get separate, more patient retry handling than other errors.
 func (l *AgenticLoop) generateWithRetry(ctx context.Context, contents []*genai.Content, config *GenerateContentConfig, maxRetries int) (*GenerateResponse, error) {
@@ -117,7 +125,7 @@ func (l *AgenticLoop) generateWithRetry(ctx context.Context, contents []*genai.C
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(delay):
+		case <-l.backoff(delay):
 		}
 	}
 
@@ -149,7 +157,7 @@ func (l *AgenticLoop) generateStreamingWithRetry(ctx context.Context, contents [
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(addJitter(time.Duration(attempt) * time.Second)):
+			case <-l.backoff(addJitter(time.Duration(attempt) * time.Second)):
 			}
 		}
 		emitted := false

@@ -61,4 +61,7 @@ type AgenticLoop struct {
 	// TextDeltaEvent carries real incremental deltas rather than the whole
 	// turn's text at once (lifedash M17). Off, nothing changes.
 	streamTokens bool
+	// after is the retry back-off timer; nil means time.After. Tests
+	// replace it to observe the delays without waiting them out.
+	after func(time.Duration) <-chan time.Time
 }
