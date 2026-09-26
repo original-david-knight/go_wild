@@ -309,16 +309,19 @@ func TestFactCurationFilters(t *testing.T) {
 		m1, m2 := ItemID("gmail:facts", "m1"), ItemID("gmail:facts", "m2")
 		bob, _ := s.CreateEntity(ctx, db, Owner, EntityInput{Name: ptr("Bob")})
 
-		for name, in := range map[string]FactInput{
-			"blank text":         {Text: ptr("")},
-			"confidence":         {Text: ptr("x"), Confidence: ptr(1.5)},
-			"window":             {Text: ptr("x"), ValidFrom: ptr(t0), ValidUntil: ptr(t0.Add(-time.Hour))},
-			"context":            {Text: ptr("x"), Context: ptr("No Good")},
-			"tag":                {Text: ptr("x"), Tags: &[]string{"bad tag"}},
-			"supersedes missing": {Text: ptr("x"), Supersedes: ptr("fct_missing")},
+		for name, tc := range map[string]struct {
+			in   FactInput
+			want error
+		}{
+			"blank text":         {FactInput{Text: ptr("")}, ErrInvalid},
+			"confidence":         {FactInput{Text: ptr("x"), Confidence: ptr(1.5)}, ErrInvalid},
+			"window":             {FactInput{Text: ptr("x"), ValidFrom: ptr(t0), ValidUntil: ptr(t0.Add(-time.Hour))}, ErrInvalid},
+			"context":            {FactInput{Text: ptr("x"), Context: ptr("No Good")}, ErrInvalid},
+			"tag":                {FactInput{Text: ptr("x"), Tags: &[]string{"bad tag"}}, ErrInvalid},
+			"supersedes missing": {FactInput{Text: ptr("x"), Supersedes: ptr("fct_missing")}, ErrNotFound},
 		} {
-			if _, err := s.CreateFact(ctx, db, Agent("fable"), in); err == nil {
-				t.Errorf("%s accepted", name)
+			if _, err := s.CreateFact(ctx, db, Agent("fable"), tc.in); !errors.Is(err, tc.want) {
+				t.Errorf("%s = %v, want %v", name, err, tc.want)
 			}
 		}
 		if _, err := s.CreateFact(ctx, db, Agent("fable"), FactInput{}); !errors.Is(err, ErrInvalid) {
