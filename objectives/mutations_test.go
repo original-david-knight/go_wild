@@ -136,6 +136,9 @@ func TestApplyMutationsRollsBackOnError(t *testing.T) {
 		{"add under a missing id", func(string, string) TreeMutation {
 			return TreeMutation{Action: MutationAdd, ParentID: missing, Title: "x"}
 		}, "add mutation: parent " + missing + " not found"},
+		{"add under a key result", func(_, kr string) TreeMutation {
+			return TreeMutation{Action: MutationAdd, ParentID: kr, Title: "x"}
+		}, "the tree is two levels"},
 		{"update a missing node", func(string, string) TreeMutation {
 			return TreeMutation{Action: MutationUpdate, ObjectiveID: missing, Title: "x"}
 		}, "update mutation: get " + missing},
