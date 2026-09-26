@@ -233,26 +233,40 @@ func TestSqliteTransactionHandleSemantics(t *testing.T) {
 	}
 }
 
-func TestSqliteTxTablesForUnregisteredModelsAreNil(t *testing.T) {
+// TestSqliteTablesExistOnlyForRegisteredModels checks that a handle, a
+// transaction and their user-scoped views hand out a DAO for a registered
+// model and nil for one never added.
+func TestSqliteTablesExistOnlyForRegisteredModels(t *testing.T) {
 	db, err := NewSqliteDatabase(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	err = db.RunInTransaction(context.Background(), func(tx Database) error {
-		if dao := tx.Table(TestUser{}); dao != nil {
+	if err := db.AddTable(TestUser{}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	err = db.RunInTransaction(ctx, func(tx Database) error {
+		if dao := tx.Table(typedRow{}); dao != nil {
 			t.Errorf("tx.Table for an unregistered model = %T, want nil", dao)
 		}
-		if dao := tx.ForUser("u").Table(TestUser{}); dao != nil {
+		if dao := tx.ForUser("u").Table(typedRow{}); dao != nil {
 			t.Errorf("tx.ForUser.Table for an unregistered model = %T, want nil", dao)
 		}
-		return nil
+		return tx.ForUser("u").Table(TestUser{}).Insert(ctx, &TestUser{ID: "t1", Name: "in tx"})
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dao := db.ForUser("u").Table(TestUser{}); dao != nil {
+	if dao := db.ForUser("u").Table(typedRow{}); dao != nil {
 		t.Errorf("ForUser.Table for an unregistered model = %T, want nil", dao)
+	}
+	var got TestUser
+	if err := db.ForUser("u").Table(TestUser{}).Get(ctx, "t1", &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "in tx" || got.UserID != "u" {
+		t.Fatalf("row written through the tx's user table = %+v, want Name in tx, UserID u", got)
 	}
 }
 
