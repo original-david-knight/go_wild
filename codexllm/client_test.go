@@ -3,10 +3,13 @@ package codexllm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -237,6 +240,113 @@ exit 3
 			t.Fatalf("iter %d: Generate() error = %v, want one mentioning exit", i, err)
 		}
 	}
+}
+
+// holdingLog is a log sink that holds the first write equal to hold until
+// release returns true, standing in for a slow log sink.
+type holdingLog struct {
+	mu      sync.Mutex
+	buf     strings.Builder
+	hold    string
+	release func() bool
+}
+
+func (l *holdingLog) Write(p []byte) (int, error) {
+	if string(p) == l.hold {
+		for !l.release() {
+			runtime.Gosched()
+		}
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *holdingLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
+}
+
+// The child's stderr is still unread when it exits, so the reported output
+// must wait for the reader to reach EOF before Wait closes the pipe.
+func TestGenerate_ReportsAllStderrOfAFailedRun(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("watches the child and the pipe through /proc")
+	}
+	done := filepath.Join(t.TempDir(), "done")
+	t.Setenv("DONE_FILE", done)
+	stageFakeCodex(t, `#!/bin/sh
+i=1
+while [ $i -le 2000 ]; do echo "line $i" >&2; i=$((i+1)); done
+echo $$ $(readlink /proc/$$/fd/2) > "$DONE_FILE.tmp" && mv "$DONE_FILE.tmp" "$DONE_FILE"
+exit 3
+`)
+	var exitedAt time.Time
+	logs := &holdingLog{
+		hold: "[job] stderr: line 1\n",
+		// Hold the reader, with the rest of stderr still in the pipe, until
+		// Generate has closed the pipe or has let the exited child sit
+		// unreaped for a while.
+		release: func() bool {
+			raw, err := os.ReadFile(done)
+			if err != nil {
+				return false
+			}
+			pid, pipe, _ := strings.Cut(strings.TrimSpace(string(raw)), " ")
+			if !holdsFD(t, pipe) {
+				return true
+			}
+			stat, err := os.ReadFile("/proc/" + pid + "/stat")
+			if err != nil || !strings.Contains(string(stat), ") Z ") {
+				return false
+			}
+			if exitedAt.IsZero() {
+				exitedAt = time.Now()
+			}
+			return time.Since(exitedAt) > 200*time.Millisecond
+		},
+	}
+	prevOut, prevFlags := log.Writer(), log.Flags()
+	log.SetOutput(logs)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(prevOut)
+		log.SetFlags(prevFlags)
+	})
+
+	_, err := (&Client{Label: "job"}).Generate(context.Background(), "p", "")
+	if err == nil || !strings.HasSuffix(err.Error(), ": exit status 3") {
+		t.Fatalf("err = %v", err)
+	}
+	var want strings.Builder
+	want.WriteString("[job] stderr output: line 1")
+	for i := 2; i <= 2000; i++ {
+		fmt.Fprintf(&want, "\nline %d", i)
+	}
+	want.WriteString("\n")
+	if out := logs.String(); !strings.Contains(out, want.String()) {
+		_, reported, _ := strings.Cut(out, "[job] stderr output: ")
+		reported, _, _ = strings.Cut(reported, "\n[job]")
+		lines := strings.Split(strings.TrimRight(reported, "\n"), "\n")
+		t.Errorf("stderr output holds %d lines, the last %q; want 2000 lines", len(lines), lines[len(lines)-1])
+	}
+}
+
+// holdsFD reports whether this process has a descriptor open on target, a
+// link such as "pipe:[123]".
+func holdsFD(t *testing.T, target string) bool {
+	t.Helper()
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatalf("list fds: %v", err)
+	}
+	for _, e := range entries {
+		if link, err := os.Readlink("/proc/self/fd/" + e.Name()); err == nil && link == target {
+			return true
+		}
+	}
+	return false
 }
 
 // TestGenerate_EmptyResult verifies the empty-response guard.
