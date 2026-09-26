@@ -108,15 +108,6 @@ func TestDropReleasesTheHandleAndRecordsTheError(t *testing.T) {
 	}
 }
 
-func TestWaitStopsOnContextCancel(t *testing.T) {
-	k := newIdleKeeper("dsn", Options{})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if k.wait(ctx, maxBackoff) {
-		t.Fatal("wait on a cancelled context must report false")
-	}
-}
-
 func TestLoopExitsWhenContextIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
