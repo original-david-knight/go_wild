@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -198,6 +200,49 @@ exit 3
 	}
 	if !strings.Contains(logs.String(), "[job] stderr output: auth failed\n") {
 		t.Errorf("stderr not logged:\n%s", logs.String())
+	}
+}
+
+// The child's stderr is still unread when it exits, so the reported output
+// must wait for the reader instead of racing it.
+func TestGenerateReportsAllStderrOfAFailedRun(t *testing.T) {
+	logs := captureLog(t)
+	done := filepath.Join(t.TempDir(), "done")
+	t.Setenv("DONE_FILE", done)
+	stageFakeClaude(t, `#!/bin/sh
+i=1
+while [ $i -le 2000 ]; do echo "line $i" >&2; i=$((i+1)); done
+: > "$DONE_FILE"
+exit 3
+`)
+	logs.onLine = func(line string) {
+		// Hold the reader after its first line until the child has written
+		// everything and is exiting, as a slow log sink would.
+		if line != "[job] stderr: line 1\n" {
+			return
+		}
+		for {
+			if _, err := os.Stat(done); err == nil {
+				return
+			}
+			runtime.Gosched()
+		}
+	}
+	_, err := (&Client{Label: "job"}).Generate(context.Background(), "p", "")
+	if err == nil || !strings.HasSuffix(err.Error(), ": exit status 3") {
+		t.Fatalf("err = %v", err)
+	}
+	var want strings.Builder
+	want.WriteString("[job] stderr output: line 1")
+	for i := 2; i <= 2000; i++ {
+		fmt.Fprintf(&want, "\nline %d", i)
+	}
+	want.WriteString("\n")
+	if out := logs.String(); !strings.Contains(out, want.String()) {
+		_, reported, _ := strings.Cut(out, "[job] stderr output: ")
+		reported, _, _ = strings.Cut(reported, "\n[job]")
+		lines := strings.Split(reported, "\n")
+		t.Errorf("stderr output holds %d lines, the last %q; want 2000 lines", len(lines), lines[len(lines)-1])
 	}
 }
 
