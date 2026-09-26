@@ -255,9 +255,10 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 		_, _ = io.Copy(io.Discard, stdout)
 	}
 
+	// Wait closes the pipe, so the reader has to reach EOF first.
+	stderrWG.Wait()
 	elapsed := time.Since(started).Round(time.Millisecond)
 	waitErr := cmd.Wait()
-	stderrWG.Wait()
 	if waitErr != nil {
 		if ctx.Err() != nil {
 			log.Printf("[%s] context canceled after %s (events=%d, last_event=%s ago)", label, elapsed, eventCount, time.Since(lastEventTime).Round(time.Millisecond))
