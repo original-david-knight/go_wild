@@ -109,13 +109,14 @@ func TestApplyMutationsMovesAndUpdates(t *testing.T) {
 		t.Fatalf("after move to root: parent %q depth %d", got.ParentID, got.Depth)
 	}
 
-	before := time.Now().UTC()
 	if err := store.ApplyMutations(ctx, []TreeMutation{{Action: MutationUpdate, ObjectiveID: kr.ID, Status: StatusCompleted}}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = store.Get(ctx, kr.ID)
-	if got.Status != StatusCompleted || got.CompletedAt.Before(before.Add(-time.Second)) {
-		t.Fatalf("completing should stamp CompletedAt, got status %s at %v", got.Status, got.CompletedAt)
+	// The completion stamp is taken during the update, so it falls between
+	// the node's creation and the update's own UpdatedAt stamp.
+	if got.Status != StatusCompleted || got.CompletedAt.Before(got.CreatedAt) || got.CompletedAt.After(got.UpdatedAt) {
+		t.Fatalf("completing should stamp CompletedAt, got status %s at %v (created %v, updated %v)", got.Status, got.CompletedAt, got.CreatedAt, got.UpdatedAt)
 	}
 }
 
