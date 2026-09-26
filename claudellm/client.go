@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -109,7 +110,8 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 
 	// Drain stderr in background.
 	var stderrBuf strings.Builder
-	go func() {
+	var stderrWG sync.WaitGroup
+	stderrWG.Go(func() {
 		s := bufio.NewScanner(stderr)
 		s.Buffer(make([]byte, 0, 64*1024), 256*1024)
 		for s.Scan() {
@@ -118,7 +120,7 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 			stderrBuf.WriteByte('\n')
 			log.Printf("[%s] stderr: %s", label, line)
 		}
-	}()
+	})
 
 	var result string
 	lastEventTime := time.Now()
@@ -148,6 +150,8 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 		_, _ = io.Copy(io.Discard, stdout)
 	}
 
+	// Wait closes the pipe, so the reader has to reach EOF first.
+	stderrWG.Wait()
 	elapsed := time.Since(started).Round(time.Millisecond)
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
