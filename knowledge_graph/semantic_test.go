@@ -179,13 +179,16 @@ func TestSemanticSearchTools(t *testing.T) {
 		t.Fatalf("embedding after edit = %v", stored.Embedding)
 	}
 
-	for name, in := range map[string]KgSearchInput{
-		"semantic without query": {Mode: "semantic"},
-		"similar without node":   {Mode: "similar"},
-		"similar to a missing":   {Mode: "similar", NodeID: "nope"},
+	for name, tc := range map[string]struct {
+		in   KgSearchInput
+		want string
+	}{
+		"semantic without query": {KgSearchInput{Mode: "semantic"}, "query is required for semantic search"},
+		"similar without node":   {KgSearchInput{Mode: "similar"}, "node_id is required for similar mode"},
+		"similar to a missing":   {KgSearchInput{Mode: "similar", NodeID: "nope"}, "failed to get node"},
 	} {
-		if res, _ := tools.KgSearchTool(ctx, in); res.Success {
-			t.Errorf("%s succeeded: %+v", name, res.Content)
+		if res, _ := tools.KgSearchTool(ctx, tc.in); res.Success || !strings.HasPrefix(res.Error, tc.want) {
+			t.Errorf("%s = %+v, want error %q", name, res, tc.want)
 		}
 	}
 }
