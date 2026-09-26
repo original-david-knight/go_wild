@@ -258,10 +258,8 @@ func TestToolsExploreAndFilters(t *testing.T) {
 	if res, _ = tools.KgUpdateTool(ctx, KgUpdateInput{ID: carol.ID, Status: expired}); !res.Success {
 		t.Fatal(res.Error)
 	}
-	// Only the nodes are asserted: GetNeighbors still returns the edge to an
-	// expired neighbour (reported as a bug), and this test does not pin that.
-	if r = explore(KgExploreInput{StartNodeID: alice.ID}); len(r.Nodes) != 0 {
-		t.Fatalf("neighbours with expiries = %v", nodeNames(r.Nodes))
+	if r = explore(KgExploreInput{StartNodeID: alice.ID}); len(r.Nodes) != 0 || len(r.Edges) != 0 {
+		t.Fatalf("neighbours with expiries = %v, edges %v", nodeNames(r.Nodes), edgeIDs(r.Edges))
 	}
 	if r = explore(KgExploreInput{StartNodeID: alice.ID, IncludeExpired: true}); !slices.Equal(nodeNames(r.Nodes), []string{"Bob", "Carol"}) {
 		t.Fatalf("neighbours including expired = %v", nodeNames(r.Nodes))
