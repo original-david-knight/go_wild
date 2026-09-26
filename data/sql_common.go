@@ -332,3 +332,19 @@ func tableMeta(tables map[string]*modelMeta, model any) *modelMeta {
 	}
 	return tables[toSnakeCase(t.Name())+"s"]
 }
+
+// setScannedInt stores a scanned integer column in fv, which may be any
+// signed or unsigned integer kind or a pointer to one.
+func setScannedInt(fv reflect.Value, n int64) {
+	if fv.Kind() == reflect.Ptr {
+		p := reflect.New(fv.Type().Elem())
+		setScannedInt(p.Elem(), n)
+		fv.Set(p)
+		return
+	}
+	if fv.CanUint() {
+		fv.SetUint(uint64(n))
+	} else {
+		fv.SetInt(n)
+	}
+}

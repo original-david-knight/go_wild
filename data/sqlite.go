@@ -299,7 +299,8 @@ func (sqliteDialect) MakeScanDest(field fieldMeta) any {
 	switch field.Type.Kind() {
 	case reflect.String:
 		return new(sql.NullString)
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		return new(sql.NullInt64)
 	case reflect.Float32, reflect.Float64:
 		return new(sql.NullFloat64)
@@ -318,7 +319,7 @@ func (d sqliteDialect) ApplyScannedValue(fv reflect.Value, field fieldMeta, scan
 		}
 	case *sql.NullInt64:
 		if dest.Valid {
-			fv.SetInt(dest.Int64)
+			setScannedInt(fv, dest.Int64)
 		}
 	case *sql.NullFloat64:
 		if dest.Valid {
@@ -386,12 +387,6 @@ func (sqliteDialect) setFieldValue(fv reflect.Value, field fieldMeta, strVal str
 				return err
 			}
 			fv.Set(reflect.ValueOf(&f))
-		case reflect.Int64, reflect.Int:
-			var i int64
-			if err := json.Unmarshal([]byte(strVal), &i); err != nil {
-				return err
-			}
-			fv.Set(reflect.ValueOf(&i))
 		case reflect.Bool:
 			// SQLite stores bools as 0/1, handle both "0"/"1" and "true"/"false"
 			var b bool
