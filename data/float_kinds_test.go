@@ -67,6 +67,7 @@ type (
 	label string
 	ratio float64
 	flag  bool
+	blob  []byte
 )
 
 // namedRow points at named types, whose kinds match the built-in ones but
@@ -77,13 +78,14 @@ type namedRow struct {
 	PL     *label `json:"pl"`
 	PR     *ratio `json:"pr"`
 	PF     *flag  `json:"pf"`
+	PB     *blob  `json:"pb"`
 }
 
 func (namedRow) TableName() string { return "named_rows" }
 
 func sampleNamedRow() namedRow {
-	l, r, f := label("open"), ratio(0.5), flag(true)
-	return namedRow{ID: "r1", PL: &l, PR: &r, PF: &f}
+	l, r, f, b := label("open"), ratio(0.5), flag(true), blob("raw")
+	return namedRow{ID: "r1", PL: &l, PR: &r, PF: &f, PB: &b}
 }
 
 func TestSqliteRoundTripsPointersToNamedTypes(t *testing.T) {

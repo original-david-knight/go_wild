@@ -333,6 +333,15 @@ func tableMeta(tables map[string]*modelMeta, model any) *modelMeta {
 	return tables[toSnakeCase(t.Name())+"s"]
 }
 
+// setPointer points fv, a pointer field, at a new value of its own element
+// type converted from v, so a *float32 or a pointer to a named type takes a
+// float64, string or bool scanned for it.
+func setPointer(fv reflect.Value, v any) {
+	p := reflect.New(fv.Type().Elem())
+	p.Elem().Set(reflect.ValueOf(v).Convert(fv.Type().Elem()))
+	fv.Set(p)
+}
+
 // setScannedInt stores a scanned integer column in fv, which may be any
 // signed or unsigned integer kind or a pointer to one.
 func setScannedInt(fv reflect.Value, n int64) {

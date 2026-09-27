@@ -352,8 +352,7 @@ func (postgresDialect) setFieldFromScan(fv reflect.Value, field fieldMeta, scann
 			return nil
 		}
 		if isPtr {
-			s := dest.String
-			fv.Set(reflect.ValueOf(&s))
+			setPointer(fv, dest.String)
 		} else {
 			fv.SetString(dest.String)
 		}
@@ -369,8 +368,7 @@ func (postgresDialect) setFieldFromScan(fv reflect.Value, field fieldMeta, scann
 			return nil
 		}
 		if isPtr {
-			f := dest.Float64
-			fv.Set(reflect.ValueOf(&f))
+			setPointer(fv, dest.Float64)
 		} else {
 			fv.SetFloat(dest.Float64)
 		}
@@ -380,8 +378,7 @@ func (postgresDialect) setFieldFromScan(fv reflect.Value, field fieldMeta, scann
 			return nil
 		}
 		if isPtr {
-			b := dest.Bool
-			fv.Set(reflect.ValueOf(&b))
+			setPointer(fv, dest.Bool)
 		} else {
 			fv.SetBool(dest.Bool)
 		}
@@ -406,7 +403,7 @@ func (postgresDialect) setFieldFromScan(fv reflect.Value, field fieldMeta, scann
 		// Handle []byte (BYTEA) directly
 		if t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.Uint8 {
 			if isPtr {
-				fv.Set(reflect.ValueOf(&data))
+				setPointer(fv, data)
 			} else {
 				fv.SetBytes(data)
 			}

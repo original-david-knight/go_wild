@@ -386,7 +386,7 @@ func (sqliteDialect) setFieldValue(fv reflect.Value, field fieldMeta, strVal str
 			if err := json.Unmarshal([]byte(strVal), &f); err != nil {
 				return err
 			}
-			fv.Set(reflect.ValueOf(&f))
+			setPointer(fv, f)
 		case reflect.Bool:
 			// SQLite stores bools as 0/1, handle both "0"/"1" and "true"/"false"
 			var b bool
@@ -397,9 +397,9 @@ func (sqliteDialect) setFieldValue(fv reflect.Value, field fieldMeta, strVal str
 			} else {
 				return fmt.Errorf("invalid bool value: %s", strVal)
 			}
-			fv.Set(reflect.ValueOf(&b))
+			setPointer(fv, b)
 		case reflect.String:
-			fv.Set(reflect.ValueOf(&strVal))
+			setPointer(fv, strVal)
 		default:
 			// Fallback: try JSON unmarshal
 			newVal := reflect.New(elemType)
