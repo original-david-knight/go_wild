@@ -62,3 +62,65 @@ func TestPostgresDialectRoundTripsEveryFloatKind(t *testing.T) {
 		t.Fatalf("round trip mismatch\n got %+v\nwant %+v", got, in)
 	}
 }
+
+type (
+	label string
+	ratio float64
+	flag  bool
+)
+
+// namedRow points at named types, whose kinds match the built-in ones but
+// whose pointer types do not.
+type namedRow struct {
+	ID     string `json:"id"`
+	UserID string `json:"user_id"`
+	PL     *label `json:"pl"`
+	PR     *ratio `json:"pr"`
+	PF     *flag  `json:"pf"`
+}
+
+func (namedRow) TableName() string { return "named_rows" }
+
+func sampleNamedRow() namedRow {
+	l, r, f := label("open"), ratio(0.5), flag(true)
+	return namedRow{ID: "r1", PL: &l, PR: &r, PF: &f}
+}
+
+func TestSqliteRoundTripsPointersToNamedTypes(t *testing.T) {
+	db, err := NewSqliteDatabase(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.AddTable(namedRow{}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	in := sampleNamedRow()
+	if err := db.Table(namedRow{}).Insert(ctx, &in); err != nil {
+		t.Fatal(err)
+	}
+	var got namedRow
+	if err := db.Table(namedRow{}).Get(ctx, "r1", &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, in) {
+		t.Fatalf("round trip mismatch\n got %+v\nwant %+v", got, in)
+	}
+}
+
+func TestPostgresDialectRoundTripsPointersToNamedTypes(t *testing.T) {
+	pg := newPostgresOverSqlite(t, namedRow{})
+	ctx := context.Background()
+	in := sampleNamedRow()
+	if err := pg.Table(namedRow{}).Insert(ctx, &in); err != nil {
+		t.Fatal(err)
+	}
+	var got namedRow
+	if err := pg.Table(namedRow{}).Get(ctx, "r1", &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, in) {
+		t.Fatalf("round trip mismatch\n got %+v\nwant %+v", got, in)
+	}
+}
