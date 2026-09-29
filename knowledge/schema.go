@@ -54,6 +54,7 @@ func EnsureSearchSchema(db data.Database) error {
 			`CREATE INDEX IF NOT EXISTS kb_search_occurred ON kb_search (occurred_at DESC)`,
 			`CREATE INDEX IF NOT EXISTS kb_search_pending ON kb_search (embed_state) WHERE embed_state = 'pending'`,
 			`CREATE INDEX IF NOT EXISTS kb_items_source ON kb_items (source_id)`,
+			`CREATE INDEX IF NOT EXISTS kb_items_source_external ON kb_items (source_id, external_id text_pattern_ops)`,
 			`CREATE INDEX IF NOT EXISTS kb_facts_created ON kb_facts (created_at DESC)`,
 		}
 	} else {
@@ -76,6 +77,7 @@ func EnsureSearchSchema(db data.Database) error {
 			)`,
 			`CREATE INDEX IF NOT EXISTS kb_search_occurred ON kb_search (occurred_at)`,
 			`CREATE INDEX IF NOT EXISTS kb_items_source ON kb_items (source_id)`,
+			`CREATE INDEX IF NOT EXISTS kb_items_source_external ON kb_items (source_id, external_id)`,
 		}
 	}
 	for _, stmt := range statements {

@@ -13,6 +13,7 @@ import (
 // Limits on one ingested item.
 const (
 	MaxItemBody        = 1 << 20
+	MaxItemMetadata    = 1 << 20
 	MaxAttachmentText  = 1 << 20
 	MaxAttachments     = 32
 	MaxParticipants    = 200
@@ -433,8 +434,8 @@ func buildItem(src *Source, in IngestItem) (*Item, error) {
 		in.Metadata = map[string]any{}
 	}
 	meta, err := json.Marshal(in.Metadata)
-	if err != nil || len(meta) > 64<<10 {
-		return nil, invalidf("metadata must be a JSON object under 64 KiB")
+	if err != nil || len(meta) > MaxItemMetadata {
+		return nil, invalidf("metadata must be a JSON object under 1 MiB")
 	}
 	atts, _ := json.Marshal(in.Attachments)
 	pjson, _ := json.Marshal(parts)

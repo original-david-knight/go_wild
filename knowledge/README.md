@@ -24,6 +24,7 @@ svc.PutSource(ctx, db, gowild_knowledge.Owner, "gmail:personal", gowild_knowledg
 svc.Ingest(ctx, db, gowild_knowledge.Agent("importer"), "gmail:personal", batch)
 svc.CreateFact(ctx, db, gowild_knowledge.Agent("fable"), gowild_knowledge.FactInput{Text: &text})
 svc.Search(ctx, db, gowild_knowledge.SearchQuery{Text: "dentist"})
+svc.ItemsInRange(ctx, db, gowild_knowledge.ItemRange{SourceID: "slack:acme", Prefix: "C0123/"}) // one conversation's days, newest first
 svc.EmbedPending(ctx, db, 50) // on a timer
 ```
 
