@@ -56,6 +56,11 @@ func EnsureSearchSchema(db data.Database) error {
 			`CREATE INDEX IF NOT EXISTS kb_items_source ON kb_items (source_id)`,
 			`CREATE INDEX IF NOT EXISTS kb_items_source_external ON kb_items (source_id, external_id text_pattern_ops)`,
 			`CREATE INDEX IF NOT EXISTS kb_facts_created ON kb_facts (created_at DESC)`,
+			`CREATE INDEX IF NOT EXISTS kb_queries_at ON kb_queries (at DESC)`,
+			// AddTable adds new columns without a default; rows from before
+			// the read columns existed would otherwise match no filter.
+			`UPDATE kb_facts SET read_count = 0 WHERE read_count IS NULL`,
+			`UPDATE kb_facts SET expired = FALSE WHERE expired IS NULL`,
 		}
 	} else {
 		statements = []string{
@@ -78,6 +83,9 @@ func EnsureSearchSchema(db data.Database) error {
 			`CREATE INDEX IF NOT EXISTS kb_search_occurred ON kb_search (occurred_at)`,
 			`CREATE INDEX IF NOT EXISTS kb_items_source ON kb_items (source_id)`,
 			`CREATE INDEX IF NOT EXISTS kb_items_source_external ON kb_items (source_id, external_id)`,
+			`CREATE INDEX IF NOT EXISTS kb_queries_at ON kb_queries (at)`,
+			`UPDATE kb_facts SET read_count = 0 WHERE read_count IS NULL`,
+			`UPDATE kb_facts SET expired = 0 WHERE expired IS NULL`,
 		}
 	}
 	for _, stmt := range statements {

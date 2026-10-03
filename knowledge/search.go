@@ -3,6 +3,7 @@ package gowild_knowledge
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -42,7 +43,8 @@ var (
 )
 
 // SearchQuery is one search. An empty Text browses: the filters apply and
-// hits come newest first.
+// hits come newest first. Reader is who searches; a search with text by a
+// set reader is logged and counts a read on each fact hit (README, "Reads").
 type SearchQuery struct {
 	Text            string
 	Kinds           []string
@@ -56,6 +58,7 @@ type SearchQuery struct {
 	Offset          int
 	Mode            string
 	IncludeInactive bool
+	Reader          Actor
 }
 
 // SearchHit is one ranked record.
@@ -143,9 +146,6 @@ func (s *Service) Search(ctx context.Context, db data.Database, q SearchQuery) (
 		semantic, err = s.semanticCandidates(ctx, db, q)
 		if err != nil {
 			res.SemanticError = err.Error()
-			if q.Mode == ModeSemantic {
-				return res, nil
-			}
 		} else {
 			res.Semantic = true
 		}
@@ -185,6 +185,11 @@ func (s *Service) Search(ctx context.Context, db data.Database, q SearchQuery) (
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Score > all[j].Score })
 	for i := q.Offset; i < len(all) && len(res.Hits) < q.Limit; i++ {
 		res.Hits = append(res.Hits, all[i].SearchHit)
+	}
+	if q.Reader.valid() {
+		if err := s.recordSearch(ctx, db, q, res.Hits); err != nil {
+			slog.Warn("knowledge: recording a search failed", "reader", q.Reader.Name, "err", err)
+		}
 	}
 	return res, nil
 }

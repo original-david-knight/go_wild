@@ -36,3 +36,20 @@ items, entities and sources, and only the owner verifies.
 The tests run every case on SQLite and, when `initdb` is on PATH, on a
 throwaway PostgreSQL cluster. That cluster runs the pgvector cases when the
 extension is installed.
+
+## Reads
+
+The library records which facts get used:
+
+- A `Search` with non-empty text and a set `Reader` writes one `kb_queries`
+  row (reader, text, contexts, hits, fact hits) and counts a read on every
+  fact among the returned hits.
+- `NoteRead(ctx, db, reader, ids...)` counts a read on each fact a known
+  reader fetched explicitly, such as an HTTP `GET` of one fact. `GetFact`
+  itself records nothing, since callers also use it for their own views.
+- A browse (empty text), `ListFacts`, and creating or editing a fact count
+  nothing.
+
+A read raises `ReadCount` and stamps `LastReadAt`. It changes neither the
+search weight nor `UpdatedAt`. A failed recording is logged and never fails
+the search. `ListQueries` lists the log, newest first.

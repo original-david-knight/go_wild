@@ -142,7 +142,9 @@ func (ItemParticipant) TableName() string { return "kb_item_participants" }
 
 // Fact is one distilled statement. Verified facts are the owner's word and
 // outrank agent facts; SourceGone marks a fact whose cited items were all
-// deleted at their source.
+// deleted at their source. ReadCount and LastReadAt record reads (README,
+// "Reads"); Expired marks an agent fact nobody read within the expiry window,
+// which drops out of search until someone fetches it.
 type Fact struct {
 	ID           string    `json:"id"`
 	Text         string    `json:"text"`
@@ -157,11 +159,29 @@ type Fact struct {
 	Verified     bool      `json:"verified"`
 	SourceGone   bool      `json:"source_gone"`
 	Retracted    bool      `json:"retracted"`
+	ReadCount    int       `json:"read_count"`
+	LastReadAt   time.Time `json:"last_read_at,omitzero"`
+	Expired      bool      `json:"expired"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (Fact) TableName() string { return "kb_facts" }
+
+// Query is one logged search: who asked, what, in which contexts, and how
+// many hits came back, facts among them.
+type Query struct {
+	ID         string    `json:"id"`
+	At         time.Time `json:"at"`
+	ReaderKind string    `json:"reader_kind"`
+	Reader     string    `json:"reader"`
+	Text       string    `json:"text"`
+	Context    string    `json:"context"`
+	Hits       int       `json:"hits"`
+	FactHits   int       `json:"fact_hits"`
+}
+
+func (Query) TableName() string { return "kb_queries" }
 
 // Note is a longer free-form page.
 type Note struct {
@@ -223,7 +243,7 @@ func (Link) TableName() string { return "kb_links" }
 
 func init() {
 	data.RegisterFunc(func(db data.Database) error {
-		for _, table := range []any{Source{}, Item{}, ItemParticipant{}, Fact{}, Note{}, Entity{}, EntityAlias{}, Link{}} {
+		for _, table := range []any{Source{}, Item{}, ItemParticipant{}, Fact{}, Note{}, Entity{}, EntityAlias{}, Link{}, Query{}} {
 			if err := db.AddTable(table); err != nil {
 				return err
 			}
