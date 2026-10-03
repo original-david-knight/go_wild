@@ -28,7 +28,7 @@ const (
 	weightNote        = 1.2
 	weightEntity      = 1.3
 	weightFact        = 1.5
-	weightVerified    = 1.8
+	weightOwner       = 1.8
 	penaltySourceGone = 0.5
 )
 
@@ -119,8 +119,8 @@ func itemSearchRow(it *Item) searchRow {
 
 func factWeight(f *Fact) float64 {
 	w := weightFact
-	if f.Verified {
-		w = weightVerified
+	if f.AuthorKind == AuthorOwner {
+		w = weightOwner
 	}
 	conf := f.Confidence
 	if conf <= 0 || conf > 1 {

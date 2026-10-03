@@ -146,21 +146,21 @@ func TestWriteFence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !mine.Verified || mine.Confidence != 1 {
-			t.Fatalf("owner fact not verified: %+v", mine.Fact)
+		if mine.AuthorKind != AuthorOwner || mine.Confidence != 1 {
+			t.Fatalf("owner fact = %+v", mine.Fact)
 		}
 		theirs, err := s.CreateFact(ctx, db, agent, FactInput{Text: ptr("David prefers aisle seats")})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if theirs.Verified || theirs.Author != "fable" || theirs.Confidence != 0.8 {
+		if theirs.AuthorKind != AuthorAgent || theirs.Author != "fable" || theirs.Confidence != 0.8 {
 			t.Fatalf("agent fact = %+v", theirs.Fact)
 		}
 		if _, err := s.UpdateFact(ctx, db, agent, mine.ID, FactInput{Text: ptr("changed")}); !errors.Is(err, ErrForbidden) {
 			t.Fatalf("agent edited owner fact: %v", err)
 		}
-		if _, err := s.UpdateFact(ctx, db, agent, theirs.ID, FactInput{Verified: ptr(true)}); !errors.Is(err, ErrForbidden) {
-			t.Fatalf("agent verified: %v", err)
+		if _, err := s.UpdateFact(ctx, db, agent, mine.ID, FactInput{Retracted: ptr(true)}); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("agent retracted owner fact: %v", err)
 		}
 		if _, err := s.CreateFact(ctx, db, agent, FactInput{Text: ptr("Passport expires 2032"), Supersedes: ptr(mine.ID)}); !errors.Is(err, ErrForbidden) {
 			t.Fatalf("agent superseded owner fact: %v", err)
@@ -171,13 +171,15 @@ func TestWriteFence(t *testing.T) {
 		if _, err := s.UpdateFact(ctx, db, agent, theirs.ID, FactInput{Retracted: ptr(true)}); err != nil {
 			t.Fatal(err)
 		}
-		// Once the owner verifies an agent fact, agents can no longer touch it.
+		// The owner's edit leaves an agent fact the agent's: agents may still
+		// correct it.
 		other, _ := s.CreateFact(ctx, db, agent, FactInput{Text: ptr("Gym closes at 10pm")})
-		if _, err := s.UpdateFact(ctx, db, Owner, other.ID, FactInput{Verified: ptr(true)}); err != nil {
-			t.Fatal(err)
+		edited, err := s.UpdateFact(ctx, db, Owner, other.ID, FactInput{Text: ptr("Gym closes at 11pm")})
+		if err != nil || edited.AuthorKind != AuthorAgent || edited.Author != "fable" {
+			t.Fatalf("owner edit of agent fact = %+v, %v", edited, err)
 		}
-		if _, err := s.UpdateFact(ctx, db, agent, other.ID, FactInput{Retracted: ptr(true)}); !errors.Is(err, ErrForbidden) {
-			t.Fatalf("agent retracted a verified fact: %v", err)
+		if _, err := s.UpdateFact(ctx, db, agent, other.ID, FactInput{Text: ptr("Gym closes at midnight")}); err != nil {
+			t.Fatalf("agent edit after the owner's = %v", err)
 		}
 		note, err := s.CreateNote(ctx, db, Owner, NoteInput{Title: ptr("Trip"), Body: ptr("Packing list")})
 		if err != nil {
@@ -336,6 +338,22 @@ func TestSearchRankingAndFilters(t *testing.T) {
 		}
 		if _, err := s.Search(ctx, db, SearchQuery{Text: "x", Kinds: []string{"bogus"}}); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("bad kind: %v", err)
+		}
+	})
+}
+
+func TestOwnerFactsOutrankAgentFacts(t *testing.T) {
+	eachBackend(t, func(t *testing.T, db data.Database) {
+		ctx := context.Background()
+		s := New()
+		mine, _ := s.CreateFact(ctx, db, Owner, FactInput{Text: ptr("The canoe club meets on Tuesdays")})
+		theirs, _ := s.CreateFact(ctx, db, Agent("opus"), FactInput{Text: ptr("The canoe club meets on Tuesdays"), Confidence: ptr(1.0)})
+		r, err := s.Search(ctx, db, SearchQuery{Text: "canoe club"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ids := hitIDs(r); !slices.Equal(ids, []string{mine.ID, theirs.ID}) {
+			t.Fatalf("hits = %v, want the owner's fact %s before the agent's %s", ids, mine.ID, theirs.ID)
 		}
 	})
 }

@@ -52,12 +52,9 @@ func (a Actor) valid() bool {
 }
 
 // canModify is the write fence: the owner changes anything; an agent only
-// what agents wrote and the owner has not verified.
-func (a Actor) canModify(authorKind string, verified bool) bool {
-	if a.owner() {
-		return true
-	}
-	return authorKind == AuthorAgent && !verified
+// what agents wrote.
+func (a Actor) canModify(authorKind string) bool {
+	return a.owner() || authorKind == AuthorAgent
 }
 
 // Service is the knowledge base over any gowild_data database.

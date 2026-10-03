@@ -17,7 +17,6 @@ type FactInput struct {
 	ValidFrom  *time.Time `json:"valid_from,omitempty"`
 	ValidUntil *time.Time `json:"valid_until,omitempty"`
 	Supersedes *string    `json:"supersedes,omitempty"`
-	Verified   *bool      `json:"verified,omitempty"`
 	Retracted  *bool      `json:"retracted,omitempty"`
 	About      *[]string  `json:"about,omitempty"`
 	Sources    *[]string  `json:"sources,omitempty"`
@@ -31,7 +30,6 @@ type FactRef struct {
 	Confidence float64 `json:"confidence"`
 	AuthorKind string  `json:"author_kind"`
 	Author     string  `json:"author"`
-	Verified   bool    `json:"verified"`
 	SourceGone bool    `json:"source_gone"`
 	Retracted  bool    `json:"retracted"`
 	Superseded bool    `json:"superseded"`
@@ -39,7 +37,7 @@ type FactRef struct {
 }
 
 func factRef(f *Fact) FactRef {
-	return FactRef{f.ID, f.Text, f.Confidence, f.AuthorKind, f.Author, f.Verified, f.SourceGone, f.Retracted, f.SupersededBy != "", f.Expired}
+	return FactRef{f.ID, f.Text, f.Confidence, f.AuthorKind, f.Author, f.SourceGone, f.Retracted, f.SupersededBy != "", f.Expired}
 }
 
 // FactView is a fact with what it is about, where it came from and its tags.
@@ -65,8 +63,8 @@ func factAsOf(f *Fact, sources []ItemRef) time.Time {
 	return time.Time{}
 }
 
-// CreateFact records a fact. The owner's facts are verified; an agent's are
-// live immediately with the confidence it gives (0.8 when omitted).
+// CreateFact records a fact. The owner's facts carry confidence 1; an agent's
+// are live immediately with the confidence it gives (0.8 when omitted).
 func (s *Service) CreateFact(ctx context.Context, db data.Database, actor Actor, in FactInput) (*FactView, error) {
 	if !actor.valid() {
 		return nil, ErrForbidden
@@ -77,14 +75,14 @@ func (s *Service) CreateFact(ctx context.Context, db data.Database, actor Actor,
 	now := s.clock()
 	f := &Fact{ID: newID("fct_"), AuthorKind: actor.Kind, Author: actor.Name, Confidence: 0.8, CreatedAt: now, UpdatedAt: now}
 	if actor.owner() {
-		f.Confidence, f.Verified = 1, true
+		f.Confidence = 1
 	}
 	if in.Context == nil {
 		f.Context = DefaultContext
 	}
 	var out *FactView
 	err := transact(ctx, db, func(tx data.Database) error {
-		if err := s.applyFact(ctx, tx, actor, f, in, true); err != nil {
+		if err := applyFact(f, in); err != nil {
 			return err
 		}
 		if err := tx.Table(Fact{}).Insert(ctx, f); err != nil {
@@ -107,7 +105,7 @@ func (s *Service) CreateFact(ctx context.Context, db data.Database, actor Actor,
 }
 
 // UpdateFact edits a fact within the write fence: an agent may change only
-// unverified agent facts, and only the owner verifies.
+// agent facts.
 func (s *Service) UpdateFact(ctx context.Context, db data.Database, actor Actor, id string, in FactInput) (*FactView, error) {
 	var out *FactView
 	err := transact(ctx, db, func(tx data.Database) error {
@@ -118,10 +116,10 @@ func (s *Service) UpdateFact(ctx context.Context, db data.Database, actor Actor,
 		if f == nil {
 			return notFound("fact", id)
 		}
-		if !actor.canModify(f.AuthorKind, f.Verified) {
+		if !actor.canModify(f.AuthorKind) {
 			return ErrForbidden
 		}
-		if err := s.applyFact(ctx, tx, actor, f, in, false); err != nil {
+		if err := applyFact(f, in); err != nil {
 			return err
 		}
 		f.UpdatedAt = s.clock()
@@ -144,7 +142,7 @@ func (s *Service) UpdateFact(ctx context.Context, db data.Database, actor Actor,
 	return out, err
 }
 
-func (s *Service) applyFact(ctx context.Context, tx data.Database, actor Actor, f *Fact, in FactInput, fresh bool) error {
+func applyFact(f *Fact, in FactInput) error {
 	if in.Text != nil {
 		text := strings.TrimSpace(*in.Text)
 		if err := checkLen("text", text, 1, 2000); err != nil {
@@ -173,12 +171,6 @@ func (s *Service) applyFact(ctx context.Context, tx data.Database, actor Actor, 
 	}
 	if !f.ValidFrom.IsZero() && !f.ValidUntil.IsZero() && f.ValidUntil.Before(f.ValidFrom) {
 		return invalidf("valid_until is before valid_from")
-	}
-	if in.Verified != nil {
-		if !actor.owner() {
-			return ErrForbidden
-		}
-		f.Verified = *in.Verified
 	}
 	if in.Retracted != nil {
 		f.Retracted = *in.Retracted
@@ -254,7 +246,7 @@ func (s *Service) applySupersede(ctx context.Context, tx data.Database, actor Ac
 	if old == nil {
 		return notFound("fact", target)
 	}
-	if !actor.canModify(old.AuthorKind, old.Verified) {
+	if !actor.canModify(old.AuthorKind) {
 		return ErrForbidden
 	}
 	old.SupersededBy = f.ID
@@ -365,7 +357,6 @@ type FactFilter struct {
 	Tag             string
 	AuthorKind      string
 	Context         string
-	Verified        *bool
 	SourceGone      *bool
 	Expired         *bool
 	IncludeInactive bool
@@ -436,9 +427,6 @@ func (s *Service) ListFacts(ctx context.Context, db data.Database, filter FactFi
 	}
 	if filter.Context != "" {
 		opts.Where["context"] = filter.Context
-	}
-	if filter.Verified != nil {
-		opts.Where["verified"] = *filter.Verified
 	}
 	if filter.SourceGone != nil {
 		opts.Where["source_gone"] = *filter.SourceGone

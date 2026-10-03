@@ -86,7 +86,7 @@ func (s *Service) UpdateEntity(ctx context.Context, db data.Database, actor Acto
 		if err != nil {
 			return err
 		}
-		if !actor.canModify(e.AuthorKind, false) {
+		if !actor.canModify(e.AuthorKind) {
 			ok, err := onlyAddsAssociations(ctx, tx, e, in)
 			if err != nil {
 				return err
@@ -375,7 +375,7 @@ func (s *Service) MergeEntities(ctx context.Context, db data.Database, actor Act
 		if from.ID == into.ID {
 			return invalidf("an entity cannot merge into itself")
 		}
-		if !actor.canModify(from.AuthorKind, false) || !actor.canModify(into.AuthorKind, false) {
+		if !actor.canModify(from.AuthorKind) || !actor.canModify(into.AuthorKind) {
 			return ErrForbidden
 		}
 		for _, a := range from.Aliases {

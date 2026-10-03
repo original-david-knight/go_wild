@@ -91,7 +91,7 @@ type candidate struct {
 
 // Search ranks records by keyword and meaning together. Each half yields up
 // to 60 candidates; reciprocal rank fusion combines them and each record's
-// weight (facts over notes over raw items, verified over unverified) scales
+// weight (facts over notes over raw items, the owner's facts over agents') scales
 // the result.
 func (s *Service) Search(ctx context.Context, db data.Database, q SearchQuery) (*SearchResult, error) {
 	q.Text = strings.TrimSpace(q.Text)

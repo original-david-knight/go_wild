@@ -71,7 +71,7 @@ func (s *Service) UpdateNote(ctx context.Context, db data.Database, actor Actor,
 		if n == nil {
 			return notFound("note", id)
 		}
-		if !actor.canModify(n.AuthorKind, false) {
+		if !actor.canModify(n.AuthorKind) {
 			return ErrForbidden
 		}
 		if err := applyNote(n, in); err != nil {
@@ -175,7 +175,7 @@ func (s *Service) DeleteNote(ctx context.Context, db data.Database, actor Actor,
 		if n == nil {
 			return notFound("note", id)
 		}
-		if !actor.canModify(n.AuthorKind, false) {
+		if !actor.canModify(n.AuthorKind) {
 			return ErrForbidden
 		}
 		if err := dropLinks(ctx, tx, id); err != nil {

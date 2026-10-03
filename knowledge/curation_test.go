@@ -333,9 +333,6 @@ func TestFactCurationFilters(t *testing.T) {
 		if _, err := s.CreateFact(ctx, db, Agent("fable"), FactInput{Text: ptr("x"), About: &[]string{"ent_missing"}}); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("fact about a missing entity = %v", err)
 		}
-		if _, err := s.CreateFact(ctx, db, Agent("fable"), FactInput{Text: ptr("x"), Verified: ptr(true)}); !errors.Is(err, ErrForbidden) {
-			t.Fatalf("agent created a verified fact = %v", err)
-		}
 
 		chess, err := s.CreateFact(ctx, db, Agent("fable"), FactInput{Text: ptr("Bob plays chess"), Sources: &[]string{m1, " "}, About: &[]string{bob.ID, bob.ID}, Tags: &[]string{"hobby"}, Confidence: ptr(0.6), Context: ptr("Family")})
 		if err != nil {
@@ -369,7 +366,7 @@ func TestFactCurationFilters(t *testing.T) {
 			"tag":                {FactFilter{Tag: "HOBBY", IncludeInactive: true}, []string{old.ID, chess.ID}},
 			"entity and tag":     {FactFilter{EntityID: bob.ID, Tag: "hobby"}, []string{chess.ID}},
 			"entity, empty item": {FactFilter{EntityID: bob.ID, ItemID: "itm_none"}, nil},
-			"verified":           {FactFilter{Verified: ptr(true)}, []string{tennis.ID}},
+			"owner":              {FactFilter{AuthorKind: AuthorOwner}, []string{tennis.ID}},
 			"author kind":        {FactFilter{AuthorKind: AuthorAgent}, []string{golf.ID, chess.ID}},
 			"context":            {FactFilter{Context: "family"}, []string{chess.ID}},
 			"limit":              {FactFilter{Limit: 1, Offset: 1}, []string{tennis.ID}},

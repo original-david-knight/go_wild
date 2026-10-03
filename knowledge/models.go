@@ -140,8 +140,7 @@ type ItemParticipant struct {
 
 func (ItemParticipant) TableName() string { return "kb_item_participants" }
 
-// Fact is one distilled statement. Verified facts are the owner's word and
-// outrank agent facts; SourceGone marks a fact whose cited items were all
+// Fact is one distilled statement. The owner's facts outrank agent facts; SourceGone marks a fact whose cited items were all
 // deleted at their source. ReadCount and LastReadAt record reads (README,
 // "Reads"); Expired marks an agent fact nobody read within the expiry window,
 // which drops out of search until someone fetches it.
@@ -156,7 +155,6 @@ type Fact struct {
 	SupersededBy string    `json:"superseded_by"`
 	AuthorKind   string    `json:"author_kind"`
 	Author       string    `json:"author"`
-	Verified     bool      `json:"verified"`
 	SourceGone   bool      `json:"source_gone"`
 	Retracted    bool      `json:"retracted"`
 	ReadCount    int       `json:"read_count"`
