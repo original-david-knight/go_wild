@@ -120,3 +120,59 @@ func TestFactsFromBeforeReadsCountFromZero(t *testing.T) {
 		}
 	})
 }
+
+func TestUnreadAgentFactsExpireUntilSomeoneFetchesThem(t *testing.T) {
+	eachBackend(t, func(t *testing.T, db data.Database) {
+		ctx := context.Background()
+		now := t0
+		s := New(WithClock(func() time.Time { return now }))
+		day := 24 * time.Hour
+		add := func(actor Actor, text string) string {
+			f, err := s.CreateFact(ctx, db, actor, FactInput{Text: ptr(text)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return f.ID
+		}
+		kayak := add(Agent("opus"), "David owns a red kayak")
+		canoe := add(Agent("opus"), "David rents a blue canoe")
+		add(Owner, "David keeps a green paddle")
+		now = t0.Add(50 * day)
+		add(Agent("opus"), "David stores a yellow raft")
+		now = t0.Add(60 * day)
+		s.NoteRead(ctx, db, Agent("sol"), canoe)
+
+		now = t0.Add(100 * day)
+		n, err := s.ExpireUnread(ctx, db, now, 90*day)
+		if err != nil || n != 1 {
+			t.Fatalf("expired %d, %v; want 1 (the never-read kayak)", n, err)
+		}
+		if n, err := s.ExpireUnread(ctx, db, now, 90*day); err != nil || n != 0 {
+			t.Fatalf("second pass expired %d, %v; want 0", n, err)
+		}
+
+		r, err := s.Search(ctx, db, SearchQuery{Text: "kayak"})
+		if err != nil || len(r.Hits) != 0 {
+			t.Fatalf("search for the expired fact = %+v, %v; want no hits", r, err)
+		}
+		expired, err := s.ListFacts(ctx, db, FactFilter{Expired: ptr(true)})
+		if err != nil || len(expired) != 1 || expired[0].ID != kayak {
+			t.Fatalf("expired facts = %+v, %v; want the kayak", expired, err)
+		}
+		all, _ := s.ListFacts(ctx, db, FactFilter{})
+		live, _ := s.ListFacts(ctx, db, FactFilter{Expired: ptr(false)})
+		if len(all) != 4 || len(live) != 3 {
+			t.Fatalf("listed %d facts, %d live; want 4 and 3", len(all), len(live))
+		}
+
+		s.NoteRead(ctx, db, Agent("sol"), kayak)
+		back, _ := s.GetFact(ctx, db, kayak)
+		if back.Expired || back.ReadCount != 1 {
+			t.Fatalf("after a fetch: expired %v, reads %d; want false, 1", back.Expired, back.ReadCount)
+		}
+		r, _ = s.Search(ctx, db, SearchQuery{Text: "kayak"})
+		if len(r.Hits) != 1 || r.Hits[0].ID != kayak {
+			t.Fatalf("search after the fetch = %+v, want the kayak", r.Hits)
+		}
+	})
+}

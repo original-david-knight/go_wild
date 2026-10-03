@@ -37,22 +37,85 @@ func (s *Service) recordSearch(ctx context.Context, db data.Database, q SearchQu
 }
 
 // NoteRead counts one read by reader on each fact named in ids, for a
-// caller that fetched them explicitly. Other IDs, unknown IDs and a zero
-// reader count nothing. Like a search's, a failed recording is logged and
-// never reaches the caller's read.
+// caller that fetched them explicitly, and brings back any of them that had
+// expired. Other IDs, unknown IDs and a zero reader count nothing. Like a
+// search's, a failed recording is logged and never reaches the caller's
+// read.
 func (s *Service) NoteRead(ctx context.Context, db data.Database, reader Actor, ids ...string) {
 	if !reader.valid() {
 		return
 	}
 	var facts []string
+	var in []any
 	for _, id := range ids {
 		if KindOf(id) == KindFact {
-			facts = append(facts, id)
+			facts, in = append(facts, id), append(in, id)
 		}
 	}
-	if err := countReads(ctx, db, s.clock(), facts); err != nil {
+	if len(facts) == 0 {
+		return
+	}
+	err := transact(ctx, db, func(tx data.Database) error {
+		if err := countReads(ctx, tx, s.clock(), facts); err != nil {
+			return err
+		}
+		expired, err := dbx.All[Fact](ctx, tx, data.QueryOpts{Where: map[string]any{"expired": true}, WhereIn: map[string][]any{"id": in}})
+		if err != nil {
+			return err
+		}
+		for _, f := range expired {
+			f.Expired = false
+			if err := tx.Table(Fact{}).Update(ctx, f); err != nil {
+				return err
+			}
+			if err := s.reindexFact(ctx, tx, f); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		slog.Warn("knowledge: recording a read failed", "reader", reader.Name, "err", err)
 	}
+}
+
+// ExpireUnread retires the agent facts nobody has read within window: an
+// active fact whose last read, or its creation when it was never read, is
+// before now-window becomes Expired and leaves search, as a retracted fact
+// does. The owner's facts never expire. An explicit read brings a fact back
+// (NoteRead). It reports how many facts expired.
+func (s *Service) ExpireUnread(ctx context.Context, db data.Database, now time.Time, window time.Duration) (int, error) {
+	cutoff := now.Add(-window)
+	rows, err := dbx.All[Fact](ctx, db, data.QueryOpts{Where: map[string]any{
+		"author_kind": AuthorAgent, "expired": false, "retracted": false, "superseded_by": "",
+	}})
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, f := range rows {
+		last := f.CreatedAt
+		if f.LastReadAt.After(last) {
+			last = f.LastReadAt
+		}
+		if !last.Before(cutoff) {
+			continue
+		}
+		// One fact at a time, so an interrupted pass keeps what it did and
+		// the next one picks up the rest.
+		err := transact(ctx, db, func(tx data.Database) error {
+			f.Expired = true
+			if err := tx.Table(Fact{}).Update(ctx, f); err != nil {
+				return err
+			}
+			return s.reindexFact(ctx, tx, f)
+		})
+		if err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }
 
 // countReads bumps the read count and stamps the last read in one

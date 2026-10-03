@@ -35,10 +35,11 @@ type FactRef struct {
 	SourceGone bool    `json:"source_gone"`
 	Retracted  bool    `json:"retracted"`
 	Superseded bool    `json:"superseded"`
+	Expired    bool    `json:"expired"`
 }
 
 func factRef(f *Fact) FactRef {
-	return FactRef{f.ID, f.Text, f.Confidence, f.AuthorKind, f.Author, f.Verified, f.SourceGone, f.Retracted, f.SupersededBy != ""}
+	return FactRef{f.ID, f.Text, f.Confidence, f.AuthorKind, f.Author, f.Verified, f.SourceGone, f.Retracted, f.SupersededBy != "", f.Expired}
 }
 
 // FactView is a fact with what it is about, where it came from and its tags.
@@ -366,12 +367,14 @@ type FactFilter struct {
 	Context         string
 	Verified        *bool
 	SourceGone      *bool
+	Expired         *bool
 	IncludeInactive bool
 	Limit           int
 	Offset          int
 }
 
-// ListFacts lists facts newest first, for curation.
+// ListFacts lists facts newest first, for curation. Expired facts are listed
+// unless the filter leaves them out.
 func (s *Service) ListFacts(ctx context.Context, db data.Database, filter FactFilter) ([]FactView, error) {
 	limit := filter.Limit
 	if limit <= 0 || limit > 200 {
@@ -439,6 +442,9 @@ func (s *Service) ListFacts(ctx context.Context, db data.Database, filter FactFi
 	}
 	if filter.SourceGone != nil {
 		opts.Where["source_gone"] = *filter.SourceGone
+	}
+	if filter.Expired != nil {
+		opts.Where["expired"] = *filter.Expired
 	}
 	if !filter.IncludeInactive {
 		opts.Where["retracted"] = false
