@@ -106,6 +106,12 @@ Hits scoring under a quarter of the best hit's score are dropped
 found by both halves ends the list before year-old mail that matched one
 word of the question.
 
+Items that read the same, with equal titles and the same opening 600
+characters once links are removed, show once: a mailer that sends one
+notice twice with different tracking links, or a monthly notice whose text
+never changes, takes one slot, held by the best-ranked copy (with recency,
+usually the newest).
+
 Keyword search requires every term, so it runs on the question without its
 relative time words ("this month", "next week", "upcoming", "recent"):
 records rarely contain them, and recency already favours what is current.

@@ -370,8 +370,8 @@ func TestRecentItemsOutrankStaleOnesAndFactsKeepTheirWeight(t *testing.T) {
 		clock = t0
 		setupSource(t, s, db, "gmail:personal")
 		if _, err := s.Ingest(ctx, db, Owner, "gmail:personal", IngestBatch{Items: []IngestItem{
-			email("stale", "Water bill", "Your water bill is ready", t0.AddDate(0, 0, -400), "city@example.com"),
-			email("due", "Water bill", "Your water bill is ready", t0.AddDate(0, 0, 20), "city@example.com"),
+			email("stale", "Water bill", "Your water bill for July is ready", t0.AddDate(0, 0, -400), "city@example.com"),
+			email("due", "Water bill", "Your water bill for September is ready", t0.AddDate(0, 0, 20), "city@example.com"),
 		}}); err != nil {
 			t.Fatal(err)
 		}
@@ -442,6 +442,30 @@ func TestWeakHitsAreCutRelativeToTheBest(t *testing.T) {
 		}
 		if ids := search(); !slices.Equal(ids, []string{fact.ID}) {
 			t.Fatalf("hits = %v, want only the fact: the year-old digest scores under a quarter of it", ids)
+		}
+	})
+}
+
+func TestCopiesOfOneMailShowOnce(t *testing.T) {
+	eachBackend(t, func(t *testing.T, db data.Database) {
+		ctx := context.Background()
+		s := New(WithClock(func() time.Time { return t0 }))
+		setupSource(t, s, db, "gmail:personal")
+		notice := "Important information for your upcoming flight. Manage your trip at "
+		if _, err := s.Ingest(ctx, db, Owner, "gmail:personal", IngestBatch{Items: []IngestItem{
+			email("first", "Your upcoming flight", notice+"https://click.example.com/?qs=1111", t0.AddDate(0, 0, -20), "air@example.com"),
+			email("again", "Your upcoming flight", notice+"https://click.example.com/?qs=2222", t0, "air@example.com"),
+			email("receipt", "Flight receipt", "Receipt for your flight to Denver", t0.AddDate(0, 0, -200), "air@example.com"),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		r, err := s.Search(ctx, db, SearchQuery{Text: "flight"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{ItemID("gmail:personal", "again"), ItemID("gmail:personal", "receipt")}
+		if ids := hitIDs(r); !slices.Equal(ids, want) {
+			t.Fatalf("hits = %v, want %v: the newer copy of the notice stands for both", ids, want)
 		}
 	})
 }

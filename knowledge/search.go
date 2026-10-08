@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -108,6 +109,9 @@ type candidate struct {
 	SearchHit
 	weight float64
 	sim    float64
+	// copyKey is the same for items that read alone: equal titles and
+	// bodies once links are removed (mailers vary their tracking URLs).
+	copyKey string
 }
 
 // Search ranks records by keyword and meaning together. Each half yields up
@@ -207,6 +211,7 @@ func (s *Service) Search(ctx context.Context, db data.Database, q SearchQuery) (
 		all = append(all, c)
 	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Score > all[j].Score })
+	all = dropCopies(all)
 	for i, c := range all {
 		if c.Score < MinRelativeScore*all[0].Score {
 			all = all[:i]
@@ -300,6 +305,35 @@ func scanHit(backend data.Backend, scan func(dest ...any) error, extra ...any) (
 	return c, nil
 }
 
+var linkPattern = regexp.MustCompile(`https?://\S+`)
+
+// copyKey keys an item by its title and the opening of its body without
+// links; other kinds have no key and are never collapsed.
+func copyKey(kind, title, body string) string {
+	if kind != KindItem {
+		return ""
+	}
+	lead := linkPattern.ReplaceAllString(truncateRunes(body, 600), "")
+	return hashText(title, strings.Join(strings.Fields(lead), " "))
+}
+
+// dropCopies keeps the best-ranked of each set of copies; list is sorted
+// best first.
+func dropCopies(list []*candidate) []*candidate {
+	seen := map[string]bool{}
+	out := list[:0]
+	for _, c := range list {
+		if c.copyKey != "" {
+			if seen[c.copyKey] {
+				continue
+			}
+			seen[c.copyKey] = true
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
 func browse(ctx context.Context, exec data.Executor, backend data.Backend, q SearchQuery) ([]SearchHit, error) {
 	where, args := filterSQL(backend, q)
 	args = append(args, q.Limit, q.Offset)
@@ -345,6 +379,7 @@ func keywordCandidates(ctx context.Context, exec data.Executor, backend data.Bac
 			if err != nil {
 				return nil, err
 			}
+			c.copyKey = copyKey(c.Kind, c.Title, body)
 			if strings.Contains(headline, "«") {
 				c.Snippet = strings.TrimSpace(headline)
 			} else {
@@ -380,6 +415,7 @@ func keywordCandidates(ctx context.Context, exec data.Executor, backend data.Bac
 		if err != nil {
 			return nil, err
 		}
+		c.copyKey = copyKey(c.Kind, c.Title, body)
 		c.Snippet = termSnippet(c.Kind, c.Title, body, terms[0])
 		out = append(out, c)
 	}
@@ -429,6 +465,7 @@ func (s *Service) semanticCandidates(ctx context.Context, db data.Database, q Se
 		if c.sim < MinSimilarity {
 			continue
 		}
+		c.copyKey = copyKey(c.Kind, c.Title, body)
 		c.Snippet = leadSnippet(c.Kind, c.Title, body)
 		out = append(out, c)
 	}
@@ -488,6 +525,7 @@ func pgVectorCandidates(ctx context.Context, exec data.Executor, caps vectorCaps
 			if c.sim < MinSimilarity {
 				continue
 			}
+			c.copyKey = copyKey(c.Kind, c.Title, body)
 			c.Snippet = leadSnippet(c.Kind, c.Title, body)
 			out = append(out, c)
 		}
