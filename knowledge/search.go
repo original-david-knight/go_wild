@@ -43,6 +43,10 @@ var (
 	SimilarityBand = 0.03
 )
 
+// MinRelativeScore drops hits scoring under this share of the best hit's
+// score, so a strong match is not padded out with weak ones.
+var MinRelativeScore = 0.25
+
 // An item's weight fades with age toward RecencyFloor, halving its
 // distance to the floor every RecencyHalfLife. Items dated in the future
 // keep full weight.
@@ -203,6 +207,12 @@ func (s *Service) Search(ctx context.Context, db data.Database, q SearchQuery) (
 		all = append(all, c)
 	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Score > all[j].Score })
+	for i, c := range all {
+		if c.Score < MinRelativeScore*all[0].Score {
+			all = all[:i]
+			break
+		}
+	}
 	for i := q.Offset; i < len(all) && len(res.Hits) < q.Limit; i++ {
 		res.Hits = append(res.Hits, all[i].SearchHit)
 	}

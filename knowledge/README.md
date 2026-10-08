@@ -101,6 +101,11 @@ gives it. Items dated in the future keep full weight. Facts, notes and
 entities do not fade: a birthdate or an address recorded a year ago ranks as
 it did the day it was written.
 
+Hits scoring under a quarter of the best hit's score are dropped
+(`MinRelativeScore`), so a page can hold fewer hits than its limit: a fact
+found by both halves ends the list before year-old mail that matched one
+word of the question.
+
 Keyword search requires every term, so it runs on the question without its
 relative time words ("this month", "next week", "upcoming", "recent"):
 records rarely contain them, and recency already favours what is current.

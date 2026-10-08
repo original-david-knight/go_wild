@@ -408,6 +408,44 @@ func TestRelativeTimeWordsAreNotKeywords(t *testing.T) {
 	})
 }
 
+func TestWeakHitsAreCutRelativeToTheBest(t *testing.T) {
+	eachBackend(t, func(t *testing.T, db data.Database) {
+		ctx := context.Background()
+		defer func(v, b float64) { MinSimilarity, SimilarityBand = v, b }(MinSimilarity, SimilarityBand)
+		MinSimilarity, SimilarityBand = 0.3, 1
+		s := New(WithEmbedder(wordEmbedder{}), WithClock(func() time.Time { return t0 }))
+		setupSource(t, s, db, "gmail:personal")
+		if _, err := s.Ingest(ctx, db, Owner, "gmail:personal", IngestBatch{Items: []IngestItem{
+			email("digest", "Neighbourhood digest", "Bake sale Saturday, chess night Monday, knitting circle Wednesday, "+
+				"library hours extended, parking permits renewed, street sweeping Thursday, canoe club photos posted",
+				t0.AddDate(-1, 0, 0), "news@example.com"),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		digest := ItemID("gmail:personal", "digest")
+		search := func() []string {
+			if _, err := s.EmbedPending(ctx, db, 10); err != nil {
+				t.Fatal(err)
+			}
+			r, err := s.Search(ctx, db, SearchQuery{Text: "canoe club"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return hitIDs(r)
+		}
+		if ids := search(); !slices.Equal(ids, []string{digest}) {
+			t.Fatalf("alone, the digest is the best hit: %v", ids)
+		}
+		fact, err := s.CreateFact(ctx, db, Owner, FactInput{Text: ptr("The canoe club meets on Tuesdays")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ids := search(); !slices.Equal(ids, []string{fact.ID}) {
+			t.Fatalf("hits = %v, want only the fact: the year-old digest scores under a quarter of it", ids)
+		}
+	})
+}
+
 func TestSemanticSearch(t *testing.T) {
 	eachBackend(t, func(t *testing.T, db data.Database) {
 		ctx := context.Background()
