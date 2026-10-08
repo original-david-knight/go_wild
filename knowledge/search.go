@@ -49,10 +49,10 @@ var (
 var MinRelativeScore = 0.25
 
 // An item's weight fades with age toward RecencyFloor, halving its
-// distance to the floor every RecencyHalfLife. A question that names a
-// relative time ("this week", "upcoming") asks about the present, so for it
-// facts and notes fade too, faster and further: TimedRecencyHalfLife and
-// TimedRecencyFloor. Entities never fade, and records dated in the future
+// distance to the floor every RecencyHalfLife. A question about the
+// present or what comes next ("this week", "upcoming") gets a sharper fade:
+// facts and notes fade too, faster and further (TimedRecencyHalfLife,
+// TimedRecencyFloor). Entities never fade, and records dated in the future
 // keep full weight.
 var (
 	RecencyHalfLife      = 30 * 24 * time.Hour
@@ -216,7 +216,7 @@ func (s *Service) Search(ctx context.Context, db data.Database, q SearchQuery) (
 	add(semantic, false)
 	all := make([]*candidate, 0, len(order))
 	now := s.clock()
-	timed := relativeTime.MatchString(q.Text)
+	timed := presentTime.MatchString(q.Text)
 	for _, id := range order {
 		c := fused[id]
 		c.Score *= c.weight * recency(c.Kind, c.OccurredAt, now, timed)
