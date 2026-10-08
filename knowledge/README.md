@@ -72,3 +72,16 @@ counts from creation and reads alone. An expired fact leaves search the way a re
 lists in `ListFacts` with `expired` set (`FactFilter.Expired` narrows to or
 away from them), and comes back on its next explicit read through
 `NoteRead`. The owner's facts never expire.
+
+## Ended facts
+
+A fact whose `valid_until` day is over has ended. `valid_until` names the
+last day the fact holds and writers store a day as its start, so a fact ends
+24 hours after its `valid_until`: a fact about an event holds through the
+day of the event. `Ended` is stored on the fact: a write that sets or clears `valid_until` decides it against the
+service clock, and `EndElapsed(ctx, db, now)`, run on a timer, ends the facts
+whose validity ran out since. An ended fact leaves search, `ListFacts` and
+its entity's page the way a superseded one does, still comes back from
+`GetFact` and with `IncludeInactive`, and is live again once an edit moves
+its `valid_until` into the future or clears it. Ending applies to the
+owner's facts too, and ExpireUnread passes over ended facts.

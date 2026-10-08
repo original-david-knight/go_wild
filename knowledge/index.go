@@ -144,7 +144,7 @@ func factSearchRow(f *Fact, tags []string, asOf time.Time) searchRow {
 	return searchRow{
 		ID: f.ID, Kind: KindFact, Context: f.Context, OccurredAt: occurred,
 		Title: f.Text, Body: strings.Join(tags, " "),
-		Weight: factWeight(f), Active: !f.Retracted && f.SupersededBy == "" && !f.Expired,
+		Weight: factWeight(f), Active: !f.Retracted && f.SupersededBy == "" && !f.Expired && !f.Ended,
 	}
 }
 

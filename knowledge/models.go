@@ -143,7 +143,8 @@ func (ItemParticipant) TableName() string { return "kb_item_participants" }
 // Fact is one distilled statement. The owner's facts outrank agent facts; SourceGone marks a fact whose cited items were all
 // deleted at their source. ReadCount and LastReadAt record reads (README,
 // "Reads"); Expired marks an agent fact nobody read within the expiry window,
-// which drops out of search until someone fetches it.
+// which drops out of search until someone fetches it. Ended marks a fact
+// whose ValidUntil has passed (README, "Ended facts").
 type Fact struct {
 	ID           string    `json:"id"`
 	Text         string    `json:"text"`
@@ -160,6 +161,7 @@ type Fact struct {
 	ReadCount    int       `json:"read_count"`
 	LastReadAt   time.Time `json:"last_read_at,omitzero"`
 	Expired      bool      `json:"expired"`
+	Ended        bool      `json:"ended"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

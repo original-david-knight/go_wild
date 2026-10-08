@@ -34,10 +34,19 @@ type FactRef struct {
 	Retracted  bool    `json:"retracted"`
 	Superseded bool    `json:"superseded"`
 	Expired    bool    `json:"expired"`
+	Ended      bool    `json:"ended"`
 }
 
 func factRef(f *Fact) FactRef {
-	return FactRef{f.ID, f.Text, f.Confidence, f.AuthorKind, f.Author, f.SourceGone, f.Retracted, f.SupersededBy != "", f.Expired}
+	return FactRef{f.ID, f.Text, f.Confidence, f.AuthorKind, f.Author, f.SourceGone, f.Retracted, f.SupersededBy != "", f.Expired, f.Ended}
+}
+
+// endedAt reports whether f's validity has passed by now. ValidUntil names
+// the last day the fact holds, and writers store a day as its start, so the
+// fact ends a day after ValidUntil: a fact about an event holds through the
+// day of the event.
+func (f *Fact) endedAt(now time.Time) bool {
+	return !f.ValidUntil.IsZero() && !f.ValidUntil.Add(24*time.Hour).After(now)
 }
 
 // FactView is a fact with what it is about, where it came from and its tags.
@@ -85,6 +94,7 @@ func (s *Service) CreateFact(ctx context.Context, db data.Database, actor Actor,
 		if err := applyFact(f, in); err != nil {
 			return err
 		}
+		f.Ended = f.endedAt(now)
 		if err := tx.Table(Fact{}).Insert(ctx, f); err != nil {
 			return err
 		}
@@ -123,6 +133,7 @@ func (s *Service) UpdateFact(ctx context.Context, db data.Database, actor Actor,
 			return err
 		}
 		f.UpdatedAt = s.clock()
+		f.Ended = f.endedAt(f.UpdatedAt)
 		if err := tx.Table(Fact{}).Update(ctx, f); err != nil {
 			return err
 		}
@@ -398,8 +409,9 @@ type FactFilter struct {
 	Offset          int
 }
 
-// ListFacts lists facts newest first, for curation. Expired facts are listed
-// unless the filter leaves them out.
+// ListFacts lists facts newest first, for curation. Retracted, superseded
+// and ended facts are left out unless the filter includes inactive ones;
+// expired facts are listed unless the filter leaves them out.
 func (s *Service) ListFacts(ctx context.Context, db data.Database, filter FactFilter) ([]FactView, error) {
 	limit := filter.Limit
 	if limit <= 0 || limit > 200 {
@@ -471,6 +483,7 @@ func (s *Service) ListFacts(ctx context.Context, db data.Database, filter FactFi
 	if !filter.IncludeInactive {
 		opts.Where["retracted"] = false
 		opts.Where["superseded_by"] = ""
+		opts.Where["ended"] = false
 	}
 	opts.Limit, opts.Offset = limit, filter.Offset
 	rows, err := dbx.All[Fact](ctx, db, opts)

@@ -275,7 +275,7 @@ func (s *Service) entityView(ctx context.Context, db data.Database, e *Entity) (
 	}
 	v.Facts = []FactRef{}
 	for _, f := range facts {
-		if !f.Retracted && !f.Superseded {
+		if !f.Retracted && !f.Superseded && !f.Ended {
 			v.Facts = append(v.Facts, f)
 		}
 	}

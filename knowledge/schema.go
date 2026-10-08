@@ -61,6 +61,7 @@ func EnsureSearchSchema(db data.Database) error {
 			// the read columns existed would otherwise match no filter.
 			`UPDATE kb_facts SET read_count = 0 WHERE read_count IS NULL`,
 			`UPDATE kb_facts SET expired = FALSE WHERE expired IS NULL`,
+			`UPDATE kb_facts SET ended = FALSE WHERE ended IS NULL`,
 		}
 	} else {
 		statements = []string{
@@ -86,6 +87,7 @@ func EnsureSearchSchema(db data.Database) error {
 			`CREATE INDEX IF NOT EXISTS kb_queries_at ON kb_queries (at)`,
 			`UPDATE kb_facts SET read_count = 0 WHERE read_count IS NULL`,
 			`UPDATE kb_facts SET expired = 0 WHERE expired IS NULL`,
+			`UPDATE kb_facts SET ended = 0 WHERE ended IS NULL`,
 		}
 	}
 	for _, stmt := range statements {

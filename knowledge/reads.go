@@ -90,7 +90,7 @@ func (s *Service) NoteRead(ctx context.Context, db data.Database, reader Actor, 
 func (s *Service) ExpireUnread(ctx context.Context, db data.Database, now time.Time, window time.Duration, epoch time.Time) (int, error) {
 	cutoff := now.Add(-window)
 	rows, err := dbx.All[Fact](ctx, db, data.QueryOpts{Where: map[string]any{
-		"author_kind": AuthorAgent, "expired": false, "retracted": false, "superseded_by": "",
+		"author_kind": AuthorAgent, "expired": false, "retracted": false, "superseded_by": "", "ended": false,
 	}})
 	if err != nil {
 		return 0, err
