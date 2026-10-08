@@ -56,9 +56,11 @@ A read raises `ReadCount` and stamps `LastReadAt`. It changes neither the
 search weight nor `UpdatedAt`. A failed recording is logged and never fails
 the search. `ListQueries` lists the log, newest first.
 
-`ExpireUnread(ctx, db, now, window)` retires agent facts nobody read within
-the window, counting from the last read, or from creation for a fact never
-read. An expired fact leaves search the way a retracted one does, still
+`ExpireUnread(ctx, db, now, window, epoch)` retires agent facts nobody read
+within the window, counting from the latest of the fact's creation, its last
+read and `epoch`. The epoch restarts every fact's clock at once, for a caller
+whose readers began reading after the facts were written; a zero epoch
+counts from creation and reads alone. An expired fact leaves search the way a retracted one does, still
 lists in `ListFacts` with `expired` set (`FactFilter.Expired` narrows to or
 away from them), and comes back on its next explicit read through
 `NoteRead`. The owner's facts never expire.

@@ -143,11 +143,11 @@ func TestUnreadAgentFactsExpireUntilSomeoneFetchesThem(t *testing.T) {
 		s.NoteRead(ctx, db, Agent("sol"), canoe)
 
 		now = t0.Add(100 * day)
-		n, err := s.ExpireUnread(ctx, db, now, 90*day)
+		n, err := s.ExpireUnread(ctx, db, now, 90*day, time.Time{})
 		if err != nil || n != 1 {
 			t.Fatalf("expired %d, %v; want 1 (the never-read kayak)", n, err)
 		}
-		if n, err := s.ExpireUnread(ctx, db, now, 90*day); err != nil || n != 0 {
+		if n, err := s.ExpireUnread(ctx, db, now, 90*day, time.Time{}); err != nil || n != 0 {
 			t.Fatalf("second pass expired %d, %v; want 0", n, err)
 		}
 
@@ -173,6 +173,44 @@ func TestUnreadAgentFactsExpireUntilSomeoneFetchesThem(t *testing.T) {
 		r, _ = s.Search(ctx, db, SearchQuery{Text: "kayak"})
 		if len(r.Hits) != 1 || r.Hits[0].ID != kayak {
 			t.Fatalf("search after the fetch = %+v, want the kayak", r.Hits)
+		}
+	})
+}
+
+// The expiry epoch restarts every unread clock: a fact created long before
+// it and never read stays live until the epoch plus the window, and a read
+// after the epoch counts from that read.
+func TestExpiryCountsFromTheEpochAtTheEarliest(t *testing.T) {
+	eachBackend(t, func(t *testing.T, db data.Database) {
+		ctx := context.Background()
+		day := 24 * time.Hour
+		epoch := t0.Add(300 * day)
+		now := t0
+		s := New(WithClock(func() time.Time { return now }))
+		old, err := s.CreateFact(ctx, db, Agent("opus"), FactInput{Text: ptr("David owns a red kayak")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		read, err := s.CreateFact(ctx, db, Agent("opus"), FactInput{Text: ptr("David rents a blue canoe")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		now = epoch.Add(10 * day)
+		s.NoteRead(ctx, db, Agent("sol"), read.ID)
+
+		if n, err := s.ExpireUnread(ctx, db, epoch.Add(89*day), 90*day, epoch); err != nil || n != 0 {
+			t.Fatalf("at epoch+89d expired %d, %v; want 0", n, err)
+		}
+		if n, err := s.ExpireUnread(ctx, db, epoch.Add(91*day), 90*day, epoch); err != nil || n != 1 {
+			t.Fatalf("at epoch+91d expired %d, %v; want 1 (the never-read kayak)", n, err)
+		}
+		gotOld, _ := s.GetFact(ctx, db, old.ID)
+		gotRead, _ := s.GetFact(ctx, db, read.ID)
+		if !gotOld.Expired || gotRead.Expired {
+			t.Fatalf("kayak expired %v, canoe expired %v; want true, false", gotOld.Expired, gotRead.Expired)
+		}
+		if n, err := s.ExpireUnread(ctx, db, epoch.Add(101*day), 90*day, epoch); err != nil || n != 1 {
+			t.Fatalf("at epoch+101d expired %d, %v; want 1 (the canoe, read at epoch+10d)", n, err)
 		}
 	})
 }

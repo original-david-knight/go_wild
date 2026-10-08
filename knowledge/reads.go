@@ -80,11 +80,14 @@ func (s *Service) NoteRead(ctx context.Context, db data.Database, reader Actor, 
 }
 
 // ExpireUnread retires the agent facts nobody has read within window: an
-// active fact whose last read, or its creation when it was never read, is
-// before now-window becomes Expired and leaves search, as a retracted fact
-// does. The owner's facts never expire. An explicit read brings a fact back
+// active fact whose unread time, counted from the latest of its creation,
+// its last read and epoch, began before now-window becomes Expired and
+// leaves search, as a retracted fact does. Epoch restarts every clock at
+// once, for a caller whose readers started reading later than the facts
+// were written; a zero epoch counts from creation and reads alone. The
+// owner's facts never expire. An explicit read brings a fact back
 // (NoteRead). It reports how many facts expired.
-func (s *Service) ExpireUnread(ctx context.Context, db data.Database, now time.Time, window time.Duration) (int, error) {
+func (s *Service) ExpireUnread(ctx context.Context, db data.Database, now time.Time, window time.Duration, epoch time.Time) (int, error) {
 	cutoff := now.Add(-window)
 	rows, err := dbx.All[Fact](ctx, db, data.QueryOpts{Where: map[string]any{
 		"author_kind": AuthorAgent, "expired": false, "retracted": false, "superseded_by": "",
@@ -95,8 +98,10 @@ func (s *Service) ExpireUnread(ctx context.Context, db data.Database, now time.T
 	n := 0
 	for _, f := range rows {
 		last := f.CreatedAt
-		if f.LastReadAt.After(last) {
-			last = f.LastReadAt
+		for _, t := range []time.Time{f.LastReadAt, epoch} {
+			if t.After(last) {
+				last = t
+			}
 		}
 		if !last.Before(cutoff) {
 			continue
