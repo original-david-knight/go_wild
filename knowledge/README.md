@@ -100,3 +100,8 @@ older than about four months sits at half weight, in the order relevance
 gives it. Items dated in the future keep full weight. Facts, notes and
 entities do not fade: a birthdate or an address recorded a year ago ranks as
 it did the day it was written.
+
+Keyword search requires every term, so it runs on the question without its
+relative time words ("this month", "next week", "upcoming", "recent"):
+records rarely contain them, and recency already favours what is current.
+The semantic half embeds the whole question.

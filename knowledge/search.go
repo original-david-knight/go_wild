@@ -153,9 +153,11 @@ func (s *Service) Search(ctx context.Context, db data.Database, q SearchQuery) (
 		return res, nil
 	}
 
+	kq := q
+	kq.Text = keywordText(q.Text)
 	var keyword, semantic []candidate
 	if q.Mode != ModeSemantic {
-		if keyword, err = keywordCandidates(ctx, exec, backend, q); err != nil {
+		if keyword, err = keywordCandidates(ctx, exec, backend, kq); err != nil {
 			return nil, err
 		}
 	}

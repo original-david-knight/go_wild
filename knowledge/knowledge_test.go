@@ -386,6 +386,28 @@ func TestRecentItemsOutrankStaleOnesAndFactsKeepTheirWeight(t *testing.T) {
 	})
 }
 
+func TestRelativeTimeWordsAreNotKeywords(t *testing.T) {
+	eachBackend(t, func(t *testing.T, db data.Database) {
+		ctx := context.Background()
+		s := New(WithClock(func() time.Time { return t0 }))
+		setupSource(t, s, db, "gmail:personal")
+		if _, err := s.Ingest(ctx, db, Owner, "gmail:personal", IngestBatch{Items: []IngestItem{
+			email("k1", "Kayak club events", "Races on the 12th and the 26th", t0, "club@example.com"),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		for _, text := range []string{"kayak events this month", "upcoming kayak events", "kayak events next week"} {
+			r, err := s.Search(ctx, db, SearchQuery{Text: text})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ids := hitIDs(r); !slices.Equal(ids, []string{ItemID("gmail:personal", "k1")}) {
+				t.Fatalf("%q: hits = %v, want the club's events mail", text, ids)
+			}
+		}
+	})
+}
+
 func TestSemanticSearch(t *testing.T) {
 	eachBackend(t, func(t *testing.T, db data.Database) {
 		ctx := context.Background()
