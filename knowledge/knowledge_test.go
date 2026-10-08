@@ -575,6 +575,41 @@ func TestSemanticSearch(t *testing.T) {
 	})
 }
 
+// An HNSW graph missed the nearest neighbour of real queries (an entity at
+// 0.705 lost to items at 0.673), so semantic search scans exactly, and the
+// schema removes the index that earlier versions created.
+func TestSchemaRemovesApproximateVectorIndex(t *testing.T) {
+	eachBackend(t, func(t *testing.T, db data.Database) {
+		exec, backend, _ := data.Raw(db)
+		if backend != data.BackendPostgres {
+			t.Skip("PostgreSQL only")
+		}
+		ctx := context.Background()
+		if _, err := exec.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS kb_search_embedding ON kb_search USING hnsw (embedding vector_cosine_ops)`); err != nil {
+			t.Fatal(err)
+		}
+		for range 2 {
+			if err := EnsureSearchSchema(db); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var indexes []string
+		rows, err := exec.QueryContext(ctx, `SELECT indexname FROM pg_indexes WHERE tablename = 'kb_search' AND indexdef ILIKE '%embedding%'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			rows.Scan(&name)
+			indexes = append(indexes, name)
+		}
+		if len(indexes) != 0 {
+			t.Fatalf("indexes on embedding = %v, want none", indexes)
+		}
+	})
+}
+
 func TestCatalogAndExtraction(t *testing.T) {
 	eachBackend(t, func(t *testing.T, db data.Database) {
 		ctx := context.Background()

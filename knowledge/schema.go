@@ -103,9 +103,12 @@ func EnsureSearchSchema(db data.Database) error {
 		slog.Warn("knowledge: pgvector unavailable, semantic search disabled", "err", err)
 		return nil
 	}
+	// No vector index: semantic search scans exactly. Earlier versions built
+	// an HNSW index, which missed the true nearest neighbour of real queries;
+	// the README says when to revisit.
 	for _, stmt := range []string{
 		fmt.Sprintf(`ALTER TABLE kb_search ADD COLUMN IF NOT EXISTS embedding vector(%d)`, EmbeddingDimensions),
-		`CREATE INDEX IF NOT EXISTS kb_search_embedding ON kb_search USING hnsw (embedding vector_cosine_ops)`,
+		`DROP INDEX IF EXISTS kb_search_embedding`,
 	} {
 		if _, err := exec.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("knowledge vector schema: %w", err)
@@ -114,36 +117,27 @@ func EnsureSearchSchema(db data.Database) error {
 	return nil
 }
 
-// vectorSupport reports whether db can store and rank embeddings, and on
-// PostgreSQL whether pgvector supports iterative index scans (0.8+).
-func vectorSupport(ctx context.Context, db data.Database) (ok bool, iterative bool, err error) {
+// vectorSupport reports whether db can store and rank embeddings.
+func vectorSupport(ctx context.Context, db data.Database) (bool, error) {
 	exec, backend, err := data.Raw(db)
 	if err != nil {
-		return false, false, err
+		return false, err
 	}
 	if backend == data.BackendSqlite {
-		return true, false, nil
+		return true, nil
 	}
-	var version string
-	row := exec.QueryRowContext(ctx, `SELECT e.extversion FROM pg_extension e
+	var one int
+	row := exec.QueryRowContext(ctx, `SELECT 1 FROM pg_extension e
 		WHERE e.extname = 'vector' AND EXISTS (
 			SELECT 1 FROM information_schema.columns
 			WHERE table_name = 'kb_search' AND column_name = 'embedding')`)
-	if err := row.Scan(&version); err != nil {
+	if err := row.Scan(&one); err != nil {
 		if strings.Contains(err.Error(), "no rows") {
-			return false, false, nil
+			return false, nil
 		}
-		return false, false, err
+		return false, err
 	}
-	return true, versionAtLeast(version, 0, 8), nil
-}
-
-func versionAtLeast(version string, major, minor int) bool {
-	var ma, mi int
-	if _, err := fmt.Sscanf(version, "%d.%d", &ma, &mi); err != nil {
-		return false
-	}
-	return ma > major || (ma == major && mi >= minor)
+	return true, nil
 }
 
 // rebind rewrites "?" placeholders to "$n" for PostgreSQL. Queries in this

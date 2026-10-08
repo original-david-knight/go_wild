@@ -2,7 +2,6 @@ package gowild_knowledge
 
 import (
 	"context"
-	"database/sql"
 	"log/slog"
 	"math"
 	"regexp"
@@ -455,8 +454,7 @@ func (s *Service) semanticCandidates(ctx context.Context, db data.Database, q Se
 	if s.embedder == nil {
 		return nil, errSemanticOff("no embedder is configured")
 	}
-	caps := s.vectorCaps(ctx, db)
-	if !caps.ok {
+	if !s.hasVectors(ctx, db) {
 		return nil, errSemanticOff("the database has no vector support")
 	}
 	qctx, cancel := context.WithTimeout(ctx, queryTimeout)
@@ -475,7 +473,7 @@ func (s *Service) semanticCandidates(ctx context.Context, db data.Database, q Se
 	}
 	where, args := filterSQL(backend, q)
 	if backend == data.BackendPostgres {
-		return pgVectorCandidates(ctx, exec, caps, where, args, vec)
+		return pgVectorCandidates(ctx, exec, where, args, vec)
 	}
 	rows, err := exec.QueryContext(ctx, "SELECT "+hitColumns+", body, embedding FROM kb_search WHERE embedding IS NOT NULL AND "+where, args...)
 	if err != nil {
@@ -529,68 +527,44 @@ func withinBand(list []candidate) []candidate {
 	return list
 }
 
-func pgVectorCandidates(ctx context.Context, exec data.Executor, caps vectorCaps, where string, args []any, vec []float32) ([]candidate, error) {
-	// Filtered HNSW scans need a wider beam, and on pgvector 0.8+ an
-	// iterative scan, so filters do not starve the candidate list. Both are
-	// transaction-local settings.
-	run := func(q interface {
-		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-	}) ([]candidate, error) {
-		all := append([]any{vectorLiteral(vec)}, args...)
-		all = append(all, candidatePool)
-		// Rank first, then digest only the rows kept, as in keywordCandidates.
-		rows, err := q.QueryContext(ctx, rebind(data.BackendPostgres, `WITH qv AS (SELECT ?::vector AS v),
-			near AS (SELECT id, embedding <=> qv.v AS distance
-				FROM kb_search, qv
-				WHERE embedding IS NOT NULL AND `+where+`
-				ORDER BY distance LIMIT ?)
-			SELECT `+hitColumns+`, substr(body, 1, 600), 1 - near.distance, `+pgCopyText+`
-			FROM near JOIN kb_search USING (id)
-			ORDER BY near.distance`), all...)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-		var out []candidate
-		for rows.Next() {
-			var body, digest string
-			var sim float64
-			c, err := scanHit(data.BackendPostgres, rows.Scan, &body, &sim, &digest)
-			if err != nil {
-				return nil, err
-			}
-			c.sim = sim
-			if c.sim < MinSimilarity {
-				continue
-			}
-			c.copyKey = copyKey(c.Kind, c.Title, digest)
-			c.Snippet = leadSnippet(c.Kind, c.Title, body)
-			out = append(out, c)
-		}
-		if err := rows.Err(); err != nil {
-			return nil, err
-		}
-		sort.SliceStable(out, func(i, j int) bool { return out[i].sim > out[j].sim })
-		return withinBand(out), nil
-	}
-	db, ok := exec.(*sql.DB)
-	if !ok {
-		return run(exec)
-	}
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+// pgVectorCandidates ranks every embedded row by exact cosine distance: no
+// index, so the nearest neighbours are always the true ones.
+func pgVectorCandidates(ctx context.Context, exec data.Executor, where string, args []any, vec []float32) ([]candidate, error) {
+	all := append([]any{vectorLiteral(vec)}, args...)
+	all = append(all, candidatePool)
+	// Rank first, then digest only the rows kept, as in keywordCandidates.
+	rows, err := exec.QueryContext(ctx, rebind(data.BackendPostgres, `WITH qv AS (SELECT ?::vector AS v),
+		near AS (SELECT id, embedding <=> qv.v AS distance
+			FROM kb_search, qv
+			WHERE embedding IS NOT NULL AND `+where+`
+			ORDER BY distance LIMIT ?)
+		SELECT `+hitColumns+`, substr(body, 1, 600), 1 - near.distance, `+pgCopyText+`
+		FROM near JOIN kb_search USING (id)
+		ORDER BY near.distance`), all...)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `SELECT set_config('hnsw.ef_search', '200', true)`); err != nil {
-		return nil, err
-	}
-	if caps.iterative {
-		if _, err := tx.ExecContext(ctx, `SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)`); err != nil {
+	defer rows.Close()
+	var out []candidate
+	for rows.Next() {
+		var body, digest string
+		var sim float64
+		c, err := scanHit(data.BackendPostgres, rows.Scan, &body, &sim, &digest)
+		if err != nil {
 			return nil, err
 		}
+		c.sim = sim
+		if c.sim < MinSimilarity {
+			continue
+		}
+		c.copyKey = copyKey(c.Kind, c.Title, digest)
+		c.Snippet = leadSnippet(c.Kind, c.Title, body)
+		out = append(out, c)
 	}
-	return run(tx)
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return withinBand(out), nil
 }
 
 type errSemanticOff string

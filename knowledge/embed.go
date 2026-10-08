@@ -24,7 +24,7 @@ type Embedder interface {
 // returns how many rows it embedded; zero with a nil error means nothing is
 // waiting (or semantic search is unavailable). Run it on a timer.
 func (s *Service) EmbedPending(ctx context.Context, db data.Database, batch int) (int, error) {
-	if s.embedder == nil || !s.vectorCaps(ctx, db).ok {
+	if s.embedder == nil || !s.hasVectors(ctx, db) {
 		return 0, nil
 	}
 	if batch <= 0 || batch > 100 {
@@ -131,7 +131,7 @@ func (s *Service) GetStatus(ctx context.Context, db data.Database) (*Status, err
 	if backend == data.BackendSqlite {
 		active = "active = 1"
 	}
-	st := &Status{Semantic: s.embedder != nil && s.vectorCaps(ctx, db).ok}
+	st := &Status{Semantic: s.embedder != nil && s.hasVectors(ctx, db)}
 	rows, err := exec.QueryContext(ctx, `SELECT kind, count(*) FROM kb_search WHERE `+active+` GROUP BY kind`)
 	if err != nil {
 		return nil, err

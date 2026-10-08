@@ -63,10 +63,8 @@ type Service struct {
 	now      func() time.Time
 
 	mu      sync.Mutex
-	vectors *vectorCaps
+	vectors *bool
 }
-
-type vectorCaps struct{ ok, iterative bool }
 
 // Option configures a Service.
 type Option func(*Service)
@@ -91,18 +89,18 @@ func (s *Service) clock() time.Time { return s.now().UTC() }
 // SemanticEnabled reports whether an embedder is configured.
 func (s *Service) SemanticEnabled() bool { return s.embedder != nil }
 
-func (s *Service) vectorCaps(ctx context.Context, db data.Database) vectorCaps {
+func (s *Service) hasVectors(ctx context.Context, db data.Database) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.vectors != nil {
 		return *s.vectors
 	}
-	ok, iterative, err := vectorSupport(ctx, db)
+	ok, err := vectorSupport(ctx, db)
 	if err != nil {
-		return vectorCaps{}
+		return false
 	}
-	s.vectors = &vectorCaps{ok, iterative}
-	return *s.vectors
+	s.vectors = &ok
+	return ok
 }
 
 // --- identifiers and validation ---

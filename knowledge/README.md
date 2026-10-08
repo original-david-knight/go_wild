@@ -13,7 +13,8 @@ A personal knowledge base over `gowild_data`:
 
 Search runs over one derived table, `kb_search`, which is kept in step with
 every write. On PostgreSQL it uses a generated `tsvector` and, when pgvector
-is installed, 768-dimension embeddings with an HNSW index. On SQLite (tests,
+is installed, 768-dimension embeddings ranked by an exact scan ("Semantic
+neighbours" below says why there is no vector index). On SQLite (tests,
 small deployments) it uses a substring match and an in-process cosine scan.
 Keyword and semantic candidates are fused by reciprocal rank and weighted by
 kind: the owner's facts rank highest, then agents' facts, entities, notes and
@@ -125,3 +126,40 @@ a sharp one would bury the records they ask about, or the current value of
 something durable ("latest phone number") under fresh mail. Dates are not parsed into a window: an
 item is dated when it was sent, and the mail announcing next week's event
 was sent this week or earlier.
+
+## Semantic neighbours
+
+The semantic half keeps neighbours scoring at least `MinSimilarity` (0.57)
+and within `SimilarityBand` (0.03) of the best one, so the best neighbour
+decides which others survive. It has to be the true best.
+
+An HNSW index did not find it. On an offline copy of the production corpus
+(4,344 embedded rows) with real Gemini embeddings, a pgvector 0.8 HNSW index
+at `ef_search` 200 lost the best neighbour of 1 or 2 of 32 labelled
+questions in each of nine builds, whatever the insertion order and with
+iterative scans on or off. "Who is Oksana" lost her entity (0.705) to her
+DMs (0.673), and "what did I agree with Alex" lost the Alex entity (0.734),
+so the band let in 34 DMs where the answer is one record. Most misses were
+short entity records. Questions land away from the documents the graph was
+built from (a question's best match averages 0.72 similarity, a document's
+nearest neighbour 0.88), and the graph reaches them poorly: with document
+vectors as queries the same graphs found 99.3-99.8% of the true top ten at
+`ef_search` 40, against 91-93% for real questions. The planner also chose
+between the index and a sequential scan by how bloated the table was (the
+same rows took the index in a compacted table and the scan in one left
+twice the size by updates), so whether a question got the approximate
+answer depended on vacuum history.
+
+So there is no vector index, and the query ranks every embedded row
+exactly. Over that corpus the vector query takes 13 ms at the median and
+26 ms at p95. Over ten times the rows (43,440, synthetic copies) it takes
+66 ms at the median with PostgreSQL's two parallel workers and 139 ms on
+one core. Most of that time goes to reading each 3 KB vector out of TOAST
+storage: at that size counting the rows takes 9 ms and the distances 132
+ms. Revisit at about 40,000 embedded rows (one to two years at 50-100 new
+items a day), or sooner on a host where the query's p95 passes 100 ms. The
+first lever to try, not yet measured, is storing `embedding` inline (`ALTER
+TABLE kb_search ALTER COLUMN embedding SET STORAGE PLAIN`, which applies to
+rows written afterwards). If an index comes back, rerank its candidates
+exactly, and measure its recall against an exact scan on real questions,
+not on document vectors.
