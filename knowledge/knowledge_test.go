@@ -358,6 +358,34 @@ func TestOwnerFactsOutrankAgentFacts(t *testing.T) {
 	})
 }
 
+func TestRecentItemsOutrankStaleOnesAndFactsKeepTheirWeight(t *testing.T) {
+	eachBackend(t, func(t *testing.T, db data.Database) {
+		ctx := context.Background()
+		clock := t0.AddDate(-1, -1, 0)
+		s := New(WithClock(func() time.Time { return clock }))
+		fact, err := s.CreateFact(ctx, db, Agent("opus"), FactInput{Text: ptr("The water bill is paid from the joint account")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		clock = t0
+		setupSource(t, s, db, "gmail:personal")
+		if _, err := s.Ingest(ctx, db, Owner, "gmail:personal", IngestBatch{Items: []IngestItem{
+			email("stale", "Water bill", "Your water bill is ready", t0.AddDate(0, 0, -400), "city@example.com"),
+			email("due", "Water bill", "Your water bill is ready", t0.AddDate(0, 0, 20), "city@example.com"),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		r, err := s.Search(ctx, db, SearchQuery{Text: "water bill"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{fact.ID, ItemID("gmail:personal", "due"), ItemID("gmail:personal", "stale")}
+		if ids := hitIDs(r); !slices.Equal(ids, want) {
+			t.Fatalf("hits = %v, want %v: the year-old fact, the bill due in 20 days, then the 400-day-old bill", ids, want)
+		}
+	})
+}
+
 func TestSemanticSearch(t *testing.T) {
 	eachBackend(t, func(t *testing.T, db data.Database) {
 		ctx := context.Background()

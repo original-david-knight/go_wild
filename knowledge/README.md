@@ -17,7 +17,7 @@ is installed, 768-dimension embeddings with an HNSW index. On SQLite (tests,
 small deployments) it uses a substring match and an in-process cosine scan.
 Keyword and semantic candidates are fused by reciprocal rank and weighted by
 kind: the owner's facts rank highest, then agents' facts, entities, notes and
-items.
+items. "Ranking" below has the rest.
 
 ```go
 svc := gowild_knowledge.New(gowild_knowledge.WithEmbedder(e)) // e: Embedder, optional
@@ -85,3 +85,18 @@ its entity's page the way a superseded one does, still comes back from
 `GetFact` and with `IncludeInactive`, and is live again once an edit moves
 its `valid_until` into the future or clears it. Ending applies to the
 owner's facts too, and ExpireUnread passes over ended facts.
+
+## Ranking
+
+A hit's score is its reciprocal-rank fusion score (k = 60 over each half's
+top 60) times its weight: 1.8 for the owner's facts, 1.5 for agents' facts
+(both scaled by confidence), 1.3 for entities, 1.2 for notes and 1.0 for
+items.
+
+An item's weight also fades with age, measured from the service clock: it
+halves its distance to a floor of 0.5 every 30 days (`RecencyHalfLife`,
+`RecencyFloor`), so last week's mail outranks last spring's and anything
+older than about four months sits at half weight, in the order relevance
+gives it. Items dated in the future keep full weight. Facts, notes and
+entities do not fade: a birthdate or an address recorded a year ago ranks as
+it did the day it was written.

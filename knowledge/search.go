@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -41,6 +42,22 @@ var (
 	MinSimilarity  = 0.57
 	SimilarityBand = 0.03
 )
+
+// An item's weight fades with age toward RecencyFloor, halving its
+// distance to the floor every RecencyHalfLife. Items dated in the future
+// keep full weight.
+var (
+	RecencyHalfLife = 30 * 24 * time.Hour
+	RecencyFloor    = 0.5
+)
+
+func recency(kind string, occurred, now time.Time) float64 {
+	age := now.Sub(occurred)
+	if kind != KindItem || age <= 0 {
+		return 1
+	}
+	return RecencyFloor + (1-RecencyFloor)*math.Exp2(-float64(age)/float64(RecencyHalfLife))
+}
 
 // SearchQuery is one search. An empty Text browses: the filters apply and
 // hits come newest first. Reader is who searches; a search with text by a
@@ -91,8 +108,8 @@ type candidate struct {
 
 // Search ranks records by keyword and meaning together. Each half yields up
 // to 60 candidates; reciprocal rank fusion combines them and each record's
-// weight (facts over notes over raw items, the owner's facts over agents') scales
-// the result.
+// weight (facts over notes over raw items, the owner's facts over agents')
+// scales the result, and an item's weight fades with its age.
 func (s *Service) Search(ctx context.Context, db data.Database, q SearchQuery) (*SearchResult, error) {
 	q.Text = strings.TrimSpace(q.Text)
 	if q.Limit <= 0 {
@@ -177,9 +194,10 @@ func (s *Service) Search(ctx context.Context, db data.Database, q SearchQuery) (
 	add(keyword, true)
 	add(semantic, false)
 	all := make([]*candidate, 0, len(order))
+	now := s.clock()
 	for _, id := range order {
 		c := fused[id]
-		c.Score *= c.weight
+		c.Score *= c.weight * recency(c.Kind, c.OccurredAt, now)
 		all = append(all, c)
 	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Score > all[j].Score })
