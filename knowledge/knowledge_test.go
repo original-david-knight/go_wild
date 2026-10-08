@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -466,6 +467,22 @@ func TestCopiesOfOneMailShowOnce(t *testing.T) {
 		want := []string{ItemID("gmail:personal", "again"), ItemID("gmail:personal", "receipt")}
 		if ids := hitIDs(r); !slices.Equal(ids, want) {
 			t.Fatalf("hits = %v, want %v: the newer copy of the notice stands for both", ids, want)
+		}
+		// Tracker mail shares a long header and differs only further down.
+		header := strings.Repeat("Ticket REK-1300 was updated by the tracker. ", 20)
+		if _, err := s.Ingest(ctx, db, Owner, "gmail:personal", IngestBatch{Items: []IngestItem{
+			email("closed", "REK-1300 updated", header+"Status: closed", t0, "jira@example.com"),
+			email("opened", "REK-1300 updated", header+"Status: open", t0.AddDate(0, 0, -40), "jira@example.com"),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		r, err = s.Search(ctx, db, SearchQuery{Text: "REK-1300"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = []string{ItemID("gmail:personal", "closed"), ItemID("gmail:personal", "opened")}
+		if ids := hitIDs(r); !slices.Equal(ids, want) {
+			t.Fatalf("hits = %v, want %v: mails that differ past their opening are not copies", ids, want)
 		}
 	})
 }

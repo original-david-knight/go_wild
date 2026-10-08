@@ -120,7 +120,7 @@ type candidate struct {
 	SearchHit
 	weight float64
 	sim    float64
-	// copyKey is the same for items that read alone: equal titles and
+	// copyKey is the same for items that read alike: equal titles and
 	// bodies once links are removed (mailers vary their tracking URLs).
 	copyKey string
 }
@@ -317,16 +317,26 @@ func scanHit(backend data.Backend, scan func(dest ...any) error, extra ...any) (
 	return c, nil
 }
 
+// pgCopyText digests a row's whole body without links and with runs of
+// whitespace as one space, in SQL, so copies are found without sending
+// whole bodies back. ("{0,1}" because rebind turns every "?" into a
+// placeholder.)
+const pgCopyText = `md5(regexp_replace(regexp_replace(body, 'https{0,1}://\S+', '', 'g'), '\s+', ' ', 'g'))`
+
 var linkPattern = regexp.MustCompile(`https?://\S+`)
 
-// copyKey keys an item by its title and the opening of its body without
-// links; other kinds have no key and are never collapsed.
-func copyKey(kind, title, body string) string {
+// copyText is pgCopyText's counterpart for SQLite, from the whole body.
+func copyText(body string) string {
+	return strings.Join(strings.Fields(linkPattern.ReplaceAllString(body, "")), " ")
+}
+
+// copyKey keys an item by its title and its body's copy text; other kinds
+// have no key and are never collapsed.
+func copyKey(kind, title, text string) string {
 	if kind != KindItem {
 		return ""
 	}
-	lead := linkPattern.ReplaceAllString(truncateRunes(body, 600), "")
-	return hashText(title, strings.Join(strings.Fields(lead), " "))
+	return hashText(title, text)
 }
 
 // dropCopies keeps the best-ranked of each set of copies; list is sorted
@@ -373,7 +383,8 @@ func keywordCandidates(ctx context.Context, exec data.Executor, backend data.Bac
 	if backend == data.BackendPostgres {
 		query := `SELECT ` + hitColumns + `, substr(body, 1, 600),
 				ts_headline('english', substr(body, 1, 20000), tq,
-					'MaxFragments=2, MaxWords=24, MinWords=8, FragmentDelimiter=" … ", StartSel=«, StopSel=»')
+					'MaxFragments=2, MaxWords=24, MinWords=8, FragmentDelimiter=" … ", StartSel=«, StopSel=»'),
+				` + pgCopyText + `
 			FROM kb_search, websearch_to_tsquery('english', ?) tq
 			WHERE tsv @@ tq AND ` + where + `
 			ORDER BY ts_rank_cd(tsv, tq) DESC LIMIT ?`
@@ -386,12 +397,12 @@ func keywordCandidates(ctx context.Context, exec data.Executor, backend data.Bac
 		defer rows.Close()
 		var out []candidate
 		for rows.Next() {
-			var body, headline string
-			c, err := scanHit(backend, rows.Scan, &body, &headline)
+			var body, headline, digest string
+			c, err := scanHit(backend, rows.Scan, &body, &headline, &digest)
 			if err != nil {
 				return nil, err
 			}
-			c.copyKey = copyKey(c.Kind, c.Title, body)
+			c.copyKey = copyKey(c.Kind, c.Title, digest)
 			if strings.Contains(headline, "«") {
 				c.Snippet = strings.TrimSpace(headline)
 			} else {
@@ -427,7 +438,7 @@ func keywordCandidates(ctx context.Context, exec data.Executor, backend data.Bac
 		if err != nil {
 			return nil, err
 		}
-		c.copyKey = copyKey(c.Kind, c.Title, body)
+		c.copyKey = copyKey(c.Kind, c.Title, copyText(body))
 		c.Snippet = termSnippet(c.Kind, c.Title, body, terms[0])
 		out = append(out, c)
 	}
@@ -460,7 +471,7 @@ func (s *Service) semanticCandidates(ctx context.Context, db data.Database, q Se
 	if backend == data.BackendPostgres {
 		return pgVectorCandidates(ctx, exec, caps, where, args, vec)
 	}
-	rows, err := exec.QueryContext(ctx, "SELECT "+hitColumns+", substr(body, 1, 600), embedding FROM kb_search WHERE embedding IS NOT NULL AND "+where, args...)
+	rows, err := exec.QueryContext(ctx, "SELECT "+hitColumns+", body, embedding FROM kb_search WHERE embedding IS NOT NULL AND "+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -477,7 +488,7 @@ func (s *Service) semanticCandidates(ctx context.Context, db data.Database, q Se
 		if c.sim < MinSimilarity {
 			continue
 		}
-		c.copyKey = copyKey(c.Kind, c.Title, body)
+		c.copyKey = copyKey(c.Kind, c.Title, copyText(body))
 		c.Snippet = leadSnippet(c.Kind, c.Title, body)
 		out = append(out, c)
 	}
@@ -517,7 +528,7 @@ func pgVectorCandidates(ctx context.Context, exec data.Executor, caps vectorCaps
 		all := append([]any{vectorLiteral(vec)}, args...)
 		all = append(all, candidatePool)
 		rows, err := q.QueryContext(ctx, rebind(data.BackendPostgres, `WITH qv AS (SELECT ?::vector AS v)
-			SELECT `+hitColumns+`, substr(body, 1, 600), 1 - (embedding <=> qv.v)
+			SELECT `+hitColumns+`, substr(body, 1, 600), 1 - (embedding <=> qv.v), `+pgCopyText+`
 			FROM kb_search, qv
 			WHERE embedding IS NOT NULL AND `+where+`
 			ORDER BY embedding <=> qv.v LIMIT ?`), all...)
@@ -527,9 +538,9 @@ func pgVectorCandidates(ctx context.Context, exec data.Executor, caps vectorCaps
 		defer rows.Close()
 		var out []candidate
 		for rows.Next() {
-			var body string
+			var body, digest string
 			var sim float64
-			c, err := scanHit(data.BackendPostgres, rows.Scan, &body, &sim)
+			c, err := scanHit(data.BackendPostgres, rows.Scan, &body, &sim, &digest)
 			if err != nil {
 				return nil, err
 			}
@@ -537,7 +548,7 @@ func pgVectorCandidates(ctx context.Context, exec data.Executor, caps vectorCaps
 			if c.sim < MinSimilarity {
 				continue
 			}
-			c.copyKey = copyKey(c.Kind, c.Title, body)
+			c.copyKey = copyKey(c.Kind, c.Title, digest)
 			c.Snippet = leadSnippet(c.Kind, c.Title, body)
 			out = append(out, c)
 		}

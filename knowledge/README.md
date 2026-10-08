@@ -106,8 +106,8 @@ Hits scoring under a quarter of the best hit's score are dropped
 found by both halves ends the list before year-old mail that matched one
 word of the question.
 
-Items that read the same, with equal titles and the same opening 600
-characters once links are removed, show once: a mailer that sends one
+Items that read the same, with equal titles and equal bodies once links are
+removed and whitespace is collapsed, show once: a mailer that sends one
 notice twice with different tracking links, or a monthly notice whose text
 never changes, takes one slot, held by the best-ranked copy (with recency,
 usually the newest).
