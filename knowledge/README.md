@@ -112,7 +112,12 @@ notice twice with different tracking links, or a monthly notice whose text
 never changes, takes one slot, held by the best-ranked copy (with recency,
 usually the newest).
 
-Keyword search requires every term, so it runs on the question without its
-relative time words ("this month", "next week", "upcoming", "recent"):
-records rarely contain them, and recency already favours what is current.
-The semantic half embeds the whole question.
+A question with relative time words ("this month", "next week",
+"upcoming", "recent") asks about the present. Keyword search requires every
+term and records rarely contain those words, so it runs on the question
+without them; the semantic half embeds the whole question. Ranking then
+fades every dated record, facts and notes included, toward 0.2, halving
+every 7 days (`TimedRecencyHalfLife`, `TimedRecencyFloor`), so with the cut
+below last month's announcements drop out of "school events this month".
+Dates are not parsed into a window: an item is dated when it was sent, and
+the mail announcing next week's event was sent this week or earlier.

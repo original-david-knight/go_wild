@@ -49,19 +49,30 @@ var (
 var MinRelativeScore = 0.25
 
 // An item's weight fades with age toward RecencyFloor, halving its
-// distance to the floor every RecencyHalfLife. Items dated in the future
+// distance to the floor every RecencyHalfLife. A question that names a
+// relative time ("this week", "upcoming") asks about the present, so for it
+// facts and notes fade too, faster and further: TimedRecencyHalfLife and
+// TimedRecencyFloor. Entities never fade, and records dated in the future
 // keep full weight.
 var (
-	RecencyHalfLife = 30 * 24 * time.Hour
-	RecencyFloor    = 0.5
+	RecencyHalfLife      = 30 * 24 * time.Hour
+	RecencyFloor         = 0.5
+	TimedRecencyHalfLife = 7 * 24 * time.Hour
+	TimedRecencyFloor    = 0.2
 )
 
-func recency(kind string, occurred, now time.Time) float64 {
+func recency(kind string, occurred, now time.Time, timed bool) float64 {
 	age := now.Sub(occurred)
-	if kind != KindItem || age <= 0 {
+	if kind == KindEntity || age <= 0 {
 		return 1
 	}
-	return RecencyFloor + (1-RecencyFloor)*math.Exp2(-float64(age)/float64(RecencyHalfLife))
+	floor, halfLife := RecencyFloor, RecencyHalfLife
+	if timed {
+		floor, halfLife = TimedRecencyFloor, TimedRecencyHalfLife
+	} else if kind != KindItem {
+		return 1
+	}
+	return floor + (1-floor)*math.Exp2(-float64(age)/float64(halfLife))
 }
 
 // SearchQuery is one search. An empty Text browses: the filters apply and
@@ -205,9 +216,10 @@ func (s *Service) Search(ctx context.Context, db data.Database, q SearchQuery) (
 	add(semantic, false)
 	all := make([]*candidate, 0, len(order))
 	now := s.clock()
+	timed := relativeTime.MatchString(q.Text)
 	for _, id := range order {
 		c := fused[id]
-		c.Score *= c.weight * recency(c.Kind, c.OccurredAt, now)
+		c.Score *= c.weight * recency(c.Kind, c.OccurredAt, now, timed)
 		all = append(all, c)
 	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Score > all[j].Score })

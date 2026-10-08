@@ -470,6 +470,40 @@ func TestCopiesOfOneMailShowOnce(t *testing.T) {
 	})
 }
 
+func TestQuestionsNamingATimeFavourWhatIsCurrent(t *testing.T) {
+	eachBackend(t, func(t *testing.T, db data.Database) {
+		ctx := context.Background()
+		s := New(WithClock(func() time.Time { return t0 }))
+		fact, err := s.CreateFact(ctx, db, Agent("opus"), FactInput{
+			Text: ptr("The kayak club holds its events on Saturdays"), ValidFrom: ptr(t0.AddDate(0, 0, -60))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		setupSource(t, s, db, "gmail:personal")
+		if _, err := s.Ingest(ctx, db, Owner, "gmail:personal", IngestBatch{Items: []IngestItem{
+			email("k1", "Kayak club events", "Races this Saturday at the harbour", t0.AddDate(0, 0, -2), "club@example.com"),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		item := ItemID("gmail:personal", "k1")
+		for _, tc := range []struct {
+			text string
+			want []string
+		}{
+			{"kayak club events", []string{fact.ID, item}},
+			{"kayak club events this week", []string{item, fact.ID}},
+		} {
+			r, err := s.Search(ctx, db, SearchQuery{Text: tc.text})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ids := hitIDs(r); !slices.Equal(ids, tc.want) {
+				t.Fatalf("%q: hits = %v, want %v", tc.text, ids, tc.want)
+			}
+		}
+	})
+}
+
 func TestSemanticSearch(t *testing.T) {
 	eachBackend(t, func(t *testing.T, db data.Database) {
 		ctx := context.Background()
