@@ -30,7 +30,15 @@ svc.EmbedPending(ctx, db, 50) // on a timer
 ```
 
 The write fence: the owner changes anything, while an agent changes only what
-agents wrote. Only the owner deletes facts, items, entities and sources. The
+agents wrote. Only the owner deletes facts, items, entities and sources.
+
+A record's `author_kind` says whose word it is and `author` says who wrote
+it. `Owner` writes as `owner`; a caller whose owner speaks through a client
+(an assistant he dictates to) passes `Actor{Kind: AuthorOwner, Name:
+"mcp:claude"}`, and the record is the owner's with the client as its author.
+`AdoptFact(ctx, db, Owner, id)` turns an agent's fact into the owner's the
+same way: owner kind, confidence 1, no longer expired, author kept. Only the
+owner adopts, and adopting an owner fact changes nothing. The
 `kb_facts.verified` column from an earlier version stays in existing databases
 and nothing reads or writes it.
 

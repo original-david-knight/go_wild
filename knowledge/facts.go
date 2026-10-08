@@ -142,6 +142,40 @@ func (s *Service) UpdateFact(ctx context.Context, db data.Database, actor Actor,
 	return out, err
 }
 
+// AdoptFact makes an agent's fact the owner's own word, for a fact the
+// owner dictated through an agent: it becomes an owner fact with confidence
+// 1, comes back if it had expired, and keeps its author, so the record still
+// names the client that wrote it. Only the owner adopts. A fact that is
+// already the owner's comes back unchanged.
+func (s *Service) AdoptFact(ctx context.Context, db data.Database, actor Actor, id string) (*FactView, error) {
+	if !actor.owner() {
+		return nil, ErrForbidden
+	}
+	var out *FactView
+	err := transact(ctx, db, func(tx data.Database) error {
+		f, err := dbx.Get[Fact](ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if f == nil {
+			return notFound("fact", id)
+		}
+		if f.AuthorKind != AuthorOwner {
+			f.AuthorKind, f.Confidence, f.Expired, f.UpdatedAt = AuthorOwner, 1, false, s.clock()
+			if err := tx.Table(Fact{}).Update(ctx, f); err != nil {
+				return err
+			}
+			if err := s.reindexFact(ctx, tx, f); err != nil {
+				return err
+			}
+		}
+		v, err := s.factView(ctx, tx, f)
+		out = v
+		return err
+	})
+	return out, err
+}
+
 func applyFact(f *Fact, in FactInput) error {
 	if in.Text != nil {
 		text := strings.TrimSpace(*in.Text)
