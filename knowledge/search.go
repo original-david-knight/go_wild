@@ -381,15 +381,21 @@ func browse(ctx context.Context, exec data.Executor, backend data.Backend, q Sea
 func keywordCandidates(ctx context.Context, exec data.Executor, backend data.Backend, q SearchQuery) ([]candidate, error) {
 	where, args := filterSQL(backend, q)
 	if backend == data.BackendPostgres {
+		// Rank first, then digest and highlight only the rows kept: in one
+		// SELECT, PostgreSQL computes the digest for every match before the
+		// sort (252 ms for a word in half the corpus, against 51 ms).
 		query := `SELECT ` + hitColumns + `, substr(body, 1, 600),
 				ts_headline('english', substr(body, 1, 20000), tq,
 					'MaxFragments=2, MaxWords=24, MinWords=8, FragmentDelimiter=" … ", StartSel=«, StopSel=»'),
 				` + pgCopyText + `
-			FROM kb_search, websearch_to_tsquery('english', ?) tq
-			WHERE tsv @@ tq AND ` + where + `
-			ORDER BY ts_rank_cd(tsv, tq) DESC LIMIT ?`
+			FROM (SELECT id, ts_rank_cd(tsv, tq) AS rank
+					FROM kb_search, websearch_to_tsquery('english', ?) tq
+					WHERE tsv @@ tq AND ` + where + `
+					ORDER BY rank DESC LIMIT ?) top
+				JOIN kb_search USING (id) CROSS JOIN websearch_to_tsquery('english', ?) tq
+			ORDER BY top.rank DESC`
 		all := append([]any{q.Text}, args...)
-		all = append(all, candidatePool)
+		all = append(all, candidatePool, q.Text)
 		rows, err := exec.QueryContext(ctx, rebind(backend, query), all...)
 		if err != nil {
 			return nil, err
@@ -477,6 +483,7 @@ func (s *Service) semanticCandidates(ctx context.Context, db data.Database, q Se
 	}
 	defer rows.Close()
 	var out []candidate
+	bodies := map[string]string{}
 	for rows.Next() {
 		var body string
 		var blob []byte
@@ -488,8 +495,7 @@ func (s *Service) semanticCandidates(ctx context.Context, db data.Database, q Se
 		if c.sim < MinSimilarity {
 			continue
 		}
-		c.copyKey = copyKey(c.Kind, c.Title, copyText(body))
-		c.Snippet = leadSnippet(c.Kind, c.Title, body)
+		bodies[c.ID] = body
 		out = append(out, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -499,6 +505,11 @@ func (s *Service) semanticCandidates(ctx context.Context, db data.Database, q Se
 	out = withinBand(out)
 	if len(out) > candidatePool {
 		out = out[:candidatePool]
+	}
+	for i := range out {
+		c := &out[i]
+		c.copyKey = copyKey(c.Kind, c.Title, copyText(bodies[c.ID]))
+		c.Snippet = leadSnippet(c.Kind, c.Title, bodies[c.ID])
 	}
 	return out, nil
 }
@@ -527,11 +538,15 @@ func pgVectorCandidates(ctx context.Context, exec data.Executor, caps vectorCaps
 	}) ([]candidate, error) {
 		all := append([]any{vectorLiteral(vec)}, args...)
 		all = append(all, candidatePool)
-		rows, err := q.QueryContext(ctx, rebind(data.BackendPostgres, `WITH qv AS (SELECT ?::vector AS v)
-			SELECT `+hitColumns+`, substr(body, 1, 600), 1 - (embedding <=> qv.v), `+pgCopyText+`
-			FROM kb_search, qv
-			WHERE embedding IS NOT NULL AND `+where+`
-			ORDER BY embedding <=> qv.v LIMIT ?`), all...)
+		// Rank first, then digest only the rows kept, as in keywordCandidates.
+		rows, err := q.QueryContext(ctx, rebind(data.BackendPostgres, `WITH qv AS (SELECT ?::vector AS v),
+			near AS (SELECT id, embedding <=> qv.v AS distance
+				FROM kb_search, qv
+				WHERE embedding IS NOT NULL AND `+where+`
+				ORDER BY distance LIMIT ?)
+			SELECT `+hitColumns+`, substr(body, 1, 600), 1 - near.distance, `+pgCopyText+`
+			FROM near JOIN kb_search USING (id)
+			ORDER BY near.distance`), all...)
 		if err != nil {
 			return nil, err
 		}
