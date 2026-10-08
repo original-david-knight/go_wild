@@ -510,6 +510,7 @@ func TestQuestionsNamingATimeFavourWhatIsCurrent(t *testing.T) {
 			{"kayak club events", []string{fact.ID, item}},
 			{"kayak club events this week", []string{item, fact.ID}},
 			{"kayak club events last week", []string{fact.ID, item}},
+			{"latest kayak club events", []string{fact.ID, item}},
 		} {
 			r, err := s.Search(ctx, db, SearchQuery{Text: tc.text})
 			if err != nil {

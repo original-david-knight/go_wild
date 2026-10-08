@@ -116,11 +116,12 @@ Keyword search requires every term, and records rarely contain relative
 time words ("this month", "last week", "upcoming", "recent"), so it runs on
 the question without them; the semantic half embeds the whole question. A
 question about the present or what comes next ("this week", "this month",
-"next week", "today", "tomorrow", "upcoming", "recent") also fades every
+"next week", "today", "tomorrow", "upcoming") also fades every
 dated record, facts and notes included, toward 0.2, halving every 7 days
 (`TimedRecencyHalfLife`, `TimedRecencyFloor`), so with the cut below last
 month's announcements drop out of "school events this month". Past spans
-("last week", "yesterday") keep the ordinary fade, since a sharp one would
-bury the records they ask about. Dates are not parsed into a window: an
+("last week", "yesterday") and "latest" or "recent" keep the ordinary fade:
+a sharp one would bury the records they ask about, or the current value of
+something durable ("latest phone number") under fresh mail. Dates are not parsed into a window: an
 item is dated when it was sent, and the mail announcing next week's event
 was sent this week or earlier.
