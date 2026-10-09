@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	data "github.com/original-david-knight/go_wild/data"
 	"github.com/original-david-knight/go_wild/data/dbx"
@@ -312,6 +313,96 @@ func (s *Service) GetEntity(ctx context.Context, db data.Database, id string) (*
 		return nil, err
 	}
 	return s.entityView(ctx, db, e)
+}
+
+// EntityStats is a live entity with how much the knowledge base holds about
+// it, counted as GetEntity counts: its live facts, the items it took part in
+// or that are about it, and when the newest of those occurred.
+type EntityStats struct {
+	Entity
+	FactCount  int       `json:"fact_count"`
+	ItemCount  int       `json:"item_count"`
+	LastItemAt time.Time `json:"last_item_at,omitzero"`
+}
+
+// entityStatsSQL counts every live entity's facts and items in one pass.
+// Inactive flags are compared with IS NOT TRUE because columns added after a
+// row was written read as NULL, which GetEntity treats as false.
+const entityStatsSQL = `
+WITH about AS (
+	SELECT l.to_id AS entity_id, l.from_id
+	FROM kb_links l JOIN kb_entities e ON e.id = l.to_id
+	WHERE l.rel = 'about' AND e.merged_into = ''
+),
+facts AS (
+	SELECT a.entity_id, count(*) AS n
+	FROM about a JOIN kb_facts f ON f.id = a.from_id
+	WHERE f.retracted IS NOT TRUE AND f.ended IS NOT TRUE AND COALESCE(f.superseded_by, '') = ''
+	GROUP BY a.entity_id
+),
+pairs AS (
+	SELECT entity_id, from_id AS item_id FROM about WHERE substr(from_id, 1, 4) = 'itm_'
+	UNION
+	SELECT c.entity_id, p.item_id
+	FROM kb_entity_aliases c
+	JOIN kb_entities e ON e.id = c.entity_id
+	JOIN kb_item_participants p ON p.alias = c.id
+	WHERE e.merged_into = ''
+),
+items AS (
+	SELECT pairs.entity_id, count(*) AS n, max(i.occurred_at) AS last
+	FROM pairs LEFT JOIN kb_items i ON i.id = pairs.item_id
+	GROUP BY pairs.entity_id
+)
+SELECT coalesce(facts.entity_id, items.entity_id), coalesce(facts.n, 0), coalesce(items.n, 0), items.last
+FROM facts FULL OUTER JOIN items ON items.entity_id = facts.entity_id`
+
+// ListEntityStats lists every live entity by name with its counts, in two
+// queries however many entities there are.
+func (s *Service) ListEntityStats(ctx context.Context, db data.Database) ([]EntityStats, error) {
+	rows, err := dbx.All[Entity](ctx, db, data.QueryOpts{Where: map[string]any{"merged_into": ""}, OrderBy: "name"})
+	if err != nil {
+		return nil, err
+	}
+	exec, _, err := data.Raw(db)
+	if err != nil {
+		return nil, err
+	}
+	counted, err := exec.QueryContext(ctx, entityStatsSQL)
+	if err != nil {
+		return nil, err
+	}
+	defer counted.Close()
+	stats := map[string]EntityStats{}
+	for counted.Next() {
+		var id string
+		var st EntityStats
+		var last any
+		if err := counted.Scan(&id, &st.FactCount, &st.ItemCount, &last); err != nil {
+			return nil, err
+		}
+		// kb_items is a gowild_data table: SQLite keeps its times as RFC 3339
+		// text, PostgreSQL as timestamptz.
+		switch v := last.(type) {
+		case time.Time:
+			st.LastItemAt = v
+		case string:
+			st.LastItemAt, _ = time.Parse(time.RFC3339, v)
+		case []byte:
+			st.LastItemAt, _ = time.Parse(time.RFC3339, string(v))
+		}
+		stats[id] = st
+	}
+	if err := counted.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]EntityStats, 0, len(rows))
+	for _, e := range rows {
+		st := stats[e.ID]
+		st.Entity = *e
+		out = append(out, st)
+	}
+	return out, nil
 }
 
 // EntityFilter narrows ListEntities.
