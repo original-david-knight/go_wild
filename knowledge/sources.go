@@ -598,7 +598,10 @@ func (s *Service) DeleteItem(ctx context.Context, db data.Database, actor Actor,
 	})
 }
 
-func itemRefs(ctx context.Context, db data.Database, ids []string) ([]ItemRef, error) {
+// itemRefs names the items among ids, newest first (ties by ID, so a limit
+// cuts in the same place every time), at most limit of them when limit is
+// positive.
+func itemRefs(ctx context.Context, db data.Database, ids []string, limit int) ([]ItemRef, error) {
 	out := []ItemRef{}
 	if len(ids) == 0 {
 		return out, nil
@@ -607,7 +610,7 @@ func itemRefs(ctx context.Context, db data.Database, ids []string) ([]ItemRef, e
 	for i, id := range ids {
 		in[i] = id
 	}
-	rows, err := dbx.All[Item](ctx, db, data.QueryOpts{WhereIn: map[string][]any{"id": in}, OrderBy: "occurred_at", OrderDesc: true})
+	rows, err := dbx.All[Item](ctx, db, data.QueryOpts{WhereIn: map[string][]any{"id": in}, OrderBy: "occurred_at DESC, id DESC", Limit: limit})
 	if err != nil {
 		return nil, err
 	}

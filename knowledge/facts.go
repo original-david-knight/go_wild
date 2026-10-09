@@ -2,6 +2,7 @@ package gowild_knowledge
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -315,7 +316,7 @@ func (s *Service) reindexFact(ctx context.Context, db data.Database, f *Fact) er
 	if err != nil {
 		return err
 	}
-	refs, err := itemRefs(ctx, db, sources)
+	refs, err := itemRefs(ctx, db, sources, 0)
 	if err != nil {
 		return err
 	}
@@ -323,26 +324,44 @@ func (s *Service) reindexFact(ctx context.Context, db data.Database, f *Fact) er
 }
 
 func (s *Service) factView(ctx context.Context, db data.Database, f *Fact) (*FactView, error) {
-	v := &FactView{Fact: *f}
-	about, err := linksFrom(ctx, db, f.ID, RelAbout)
+	views, err := s.factViews(ctx, db, []*Fact{f})
 	if err != nil {
 		return nil, err
 	}
-	if v.About, err = entityRefs(ctx, db, about); err != nil {
-		return nil, err
+	return &views[0], nil
+}
+
+// factViews reads facts' links, entities and cited items together, in a
+// fixed number of queries however many facts there are.
+func (s *Service) factViews(ctx context.Context, db data.Database, facts []*Fact) ([]FactView, error) {
+	ids := make([]string, len(facts))
+	for i, f := range facts {
+		ids[i] = f.ID
 	}
-	sources, err := linksFrom(ctx, db, f.ID, RelSource)
+	links, err := linksFromAll(ctx, db, ids)
 	if err != nil {
 		return nil, err
 	}
-	if v.Sources, err = itemRefs(ctx, db, sources); err != nil {
+	entities, err := resolveEntityRefs(ctx, db, links.targets(RelAbout))
+	if err != nil {
 		return nil, err
 	}
-	v.AsOf = factAsOf(f, v.Sources)
-	if v.Tags, err = tagsOf(ctx, db, f.ID); err != nil {
+	items, err := itemRefs(ctx, db, links.targets(RelSource), 0)
+	if err != nil {
 		return nil, err
 	}
-	return v, nil
+	out := make([]FactView, len(facts))
+	for i, f := range facts {
+		v := FactView{Fact: *f, About: entities.list(links[f.ID][RelAbout]), Sources: []ItemRef{}, Tags: links.tags(f.ID)}
+		for _, it := range items {
+			if slices.Contains(links[f.ID][RelSource], it.ID) {
+				v.Sources = append(v.Sources, it)
+			}
+		}
+		v.AsOf = factAsOf(f, v.Sources)
+		out[i] = v
+	}
+	return out, nil
 }
 
 // GetFact reads one fact with its links.
@@ -490,15 +509,7 @@ func (s *Service) ListFacts(ctx context.Context, db data.Database, filter FactFi
 	if err != nil {
 		return nil, err
 	}
-	out := make([]FactView, 0, len(rows))
-	for _, f := range rows {
-		v, err := s.factView(ctx, db, f)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *v)
-	}
-	return out, nil
+	return s.factViews(ctx, db, rows)
 }
 
 func factRefs(ctx context.Context, db data.Database, ids []string) ([]FactRef, error) {

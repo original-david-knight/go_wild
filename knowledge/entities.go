@@ -283,8 +283,12 @@ func (s *Service) entityView(ctx context.Context, db data.Database, e *Entity) (
 	if v.Notes, err = noteRefs(ctx, db, noteIDs); err != nil {
 		return nil, err
 	}
-	for _, a := range e.Aliases {
-		rows, err := dbx.All[ItemParticipant](ctx, db, data.QueryOpts{Where: map[string]any{"alias": a}})
+	if len(e.Aliases) > 0 {
+		aliases := make([]any, len(e.Aliases))
+		for i, a := range e.Aliases {
+			aliases[i] = a
+		}
+		rows, err := dbx.All[ItemParticipant](ctx, db, data.QueryOpts{WhereIn: map[string][]any{"alias": aliases}})
 		if err != nil {
 			return nil, err
 		}
@@ -295,16 +299,14 @@ func (s *Service) entityView(ctx context.Context, db data.Database, e *Entity) (
 	slices.Sort(itemIDs)
 	itemIDs = slices.Compact(itemIDs)
 	v.ItemCount = len(itemIDs)
-	items, err := itemRefs(ctx, db, itemIDs)
-	if err != nil {
+	if v.Items, err = itemRefs(ctx, db, itemIDs, entityItems); err != nil {
 		return nil, err
 	}
-	if len(items) > 25 {
-		items = items[:25]
-	}
-	v.Items = items
 	return v, nil
 }
+
+// entityItems is how many of its newest items an entity view carries.
+const entityItems = 25
 
 // GetEntity reads an entity, following merges.
 func (s *Service) GetEntity(ctx context.Context, db data.Database, id string) (*EntityView, error) {
@@ -554,19 +556,48 @@ func (s *Service) DeleteEntity(ctx context.Context, db data.Database, actor Acto
 	})
 }
 
-func entityRefs(ctx context.Context, db data.Database, ids []string) ([]EntityRef, error) {
-	out := []EntityRef{}
-	for _, id := range ids {
-		e, err := resolveEntity(ctx, db, id)
-		if errors.Is(err, ErrNotFound) {
-			continue
+// entityRefMap names the entity each id refers to, after merges. Unknown
+// ids are absent.
+type entityRefMap map[string]EntityRef
+
+// resolveEntityRefs reads ids' entities in one query, and follows a merge
+// only for an id that was merged away.
+func resolveEntityRefs(ctx context.Context, db data.Database, ids []string) (entityRefMap, error) {
+	out := entityRefMap{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	in := make([]any, len(ids))
+	for i, id := range ids {
+		in[i] = id
+	}
+	rows, err := dbx.All[Entity](ctx, db, data.QueryOpts{WhereIn: map[string][]any{"id": in}})
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		e := r
+		if e.MergedInto != "" {
+			if e, err = resolveEntity(ctx, db, e.MergedInto); errors.Is(err, ErrNotFound) {
+				continue
+			} else if err != nil {
+				return nil, err
+			}
 		}
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, EntityRef{e.ID, e.Kind, e.Name})
+		out[r.ID] = EntityRef{e.ID, e.Kind, e.Name}
 	}
 	return out, nil
+}
+
+// list names ids' entities in order, skipping unknown ones.
+func (m entityRefMap) list(ids []string) []EntityRef {
+	out := []EntityRef{}
+	for _, id := range ids {
+		if ref, ok := m[id]; ok {
+			out = append(out, ref)
+		}
+	}
+	return out
 }
 
 func entityForAlias(ctx context.Context, db data.Database, alias string) (*EntityRef, error) {

@@ -236,6 +236,57 @@ func linksFrom(ctx context.Context, db data.Database, from, rel string) ([]strin
 	return out, nil
 }
 
+// recordLinks is the links out of a set of records, each record's under
+// each relation in creation order.
+type recordLinks map[string]map[string][]string
+
+// linksFromAll reads every link out of ids in one query.
+func linksFromAll(ctx context.Context, db data.Database, ids []string) (recordLinks, error) {
+	out := recordLinks{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	in := make([]any, len(ids))
+	for i, id := range ids {
+		in[i] = id
+	}
+	rows, err := dbx.All[Link](ctx, db, data.QueryOpts{WhereIn: map[string][]any{"from_id": in}, OrderBy: "created_at"})
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		if out[r.FromID] == nil {
+			out[r.FromID] = map[string][]string{}
+		}
+		out[r.FromID][r.Rel] = append(out[r.FromID][r.Rel], r.ToID)
+	}
+	return out, nil
+}
+
+// targets lists every record's links under rel, each target once.
+func (l recordLinks) targets(rel string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, rels := range l {
+		for _, id := range rels[rel] {
+			if !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
+// tags lists a record's tags.
+func (l recordLinks) tags(id string) []string {
+	out := []string{}
+	for _, t := range l[id][RelTag] {
+		out = append(out, strings.TrimPrefix(t, "tag:"))
+	}
+	return out
+}
+
 // linksTo lists the sources of links under rel that point at to.
 func linksTo(ctx context.Context, db data.Database, to, rel string) ([]string, error) {
 	rows, err := dbx.All[Link](ctx, db, data.QueryOpts{Where: map[string]any{"to_id": to, "rel": rel}})

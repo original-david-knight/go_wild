@@ -139,18 +139,33 @@ func (s *Service) saveNoteLinks(ctx context.Context, tx data.Database, n *Note, 
 }
 
 func (s *Service) noteView(ctx context.Context, db data.Database, n *Note) (*NoteView, error) {
-	v := &NoteView{Note: *n}
-	about, err := linksFrom(ctx, db, n.ID, RelAbout)
+	views, err := s.noteViews(ctx, db, []*Note{n})
 	if err != nil {
 		return nil, err
 	}
-	if v.About, err = entityRefs(ctx, db, about); err != nil {
+	return &views[0], nil
+}
+
+// noteViews reads notes' links and entities together, in a fixed number of
+// queries however many notes there are.
+func (s *Service) noteViews(ctx context.Context, db data.Database, notes []*Note) ([]NoteView, error) {
+	ids := make([]string, len(notes))
+	for i, n := range notes {
+		ids[i] = n.ID
+	}
+	links, err := linksFromAll(ctx, db, ids)
+	if err != nil {
 		return nil, err
 	}
-	if v.Tags, err = tagsOf(ctx, db, n.ID); err != nil {
+	entities, err := resolveEntityRefs(ctx, db, links.targets(RelAbout))
+	if err != nil {
 		return nil, err
 	}
-	return v, nil
+	out := make([]NoteView, len(notes))
+	for i, n := range notes {
+		out[i] = NoteView{Note: *n, About: entities.list(links[n.ID][RelAbout]), Tags: links.tags(n.ID)}
+	}
+	return out, nil
 }
 
 // GetNote reads one note.
@@ -251,15 +266,7 @@ func (s *Service) ListNotes(ctx context.Context, db data.Database, filter NoteFi
 	if err != nil {
 		return nil, err
 	}
-	out := make([]NoteView, 0, len(rows))
-	for _, n := range rows {
-		v, err := s.noteView(ctx, db, n)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *v)
-	}
-	return out, nil
+	return s.noteViews(ctx, db, rows)
 }
 
 func intersect(a, b []string) []string {
