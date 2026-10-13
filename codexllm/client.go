@@ -269,10 +269,11 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 		if stderrStr != "" {
 			log.Printf("[%s] stderr output: %s", label, stderrStr)
 		}
+		msg := fmt.Sprintf("%s: codex exited with error after %s: %v", label, elapsed, waitErr)
 		if failure != "" {
-			return "", nil, fmt.Errorf("%s: codex exited with error after %s (%w): %s", label, elapsed, waitErr, failure)
+			msg = fmt.Sprintf("%s: codex exited with error after %s (%v): %s", label, elapsed, waitErr, failure)
 		}
-		return "", nil, fmt.Errorf("%s: codex exited with error after %s: %w", label, elapsed, waitErr)
+		return "", nil, &RunError{Msg: msg, Exit: waitErr, Reason: failure}
 	}
 
 	if scanErr != nil {

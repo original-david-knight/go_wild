@@ -163,10 +163,11 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 		if stderrStr != "" {
 			log.Printf("[%s] stderr output: %s", label, stderrStr)
 		}
+		msg := fmt.Sprintf("%s: claude exited with error after %s: %v", label, elapsed, err)
 		if failure != "" {
-			return "", fmt.Errorf("%s: claude exited with error after %s (%w): %s", label, elapsed, err, failure)
+			msg = fmt.Sprintf("%s: claude exited with error after %s (%v): %s", label, elapsed, err, failure)
 		}
-		return "", fmt.Errorf("%s: claude exited with error after %s: %w", label, elapsed, err)
+		return "", &RunError{Msg: msg, Exit: err, Reason: failure}
 	}
 
 	if scanErr != nil {
