@@ -213,7 +213,7 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 		}
 	})
 
-	var result string
+	var result, failure string
 	lastEventTime := time.Now()
 	eventCount := 0
 	webSearchCount := 0
@@ -236,6 +236,7 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 		if ok {
 			result = text
 		}
+		failure = codexFailure(line, failure)
 		if isCodexWebSearchEvent(line) {
 			webSearchCount++
 			for _, u := range extractCodexURLs(line) {
@@ -267,6 +268,9 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 		stderrStr := strings.TrimSpace(stderrBuf.String())
 		if stderrStr != "" {
 			log.Printf("[%s] stderr output: %s", label, stderrStr)
+		}
+		if failure != "" {
+			return "", nil, fmt.Errorf("%s: codex exited with error after %s (%w): %s", label, elapsed, waitErr, failure)
 		}
 		return "", nil, fmt.Errorf("%s: codex exited with error after %s: %w", label, elapsed, waitErr)
 	}
@@ -396,6 +400,28 @@ func logCodexStreamEvent(label, line string, eventNum int) {
 			log.Printf("[%s] event #%d: type=%s", label, eventNum, msg.Type)
 		}
 	}
+}
+
+// codexFailure returns why the run failed as of line, given the reason read
+// so far: the message of a failed turn or an error event, the latest one
+// winning. An exit status alone does not tell a model at capacity from a
+// crash, and the caller only sees the error Generate returns.
+func codexFailure(line, sofar string) string {
+	var msg codexStreamMessage
+	if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		return sofar
+	}
+	switch msg.Type {
+	case "turn.failed":
+		if msg.Error != nil && strings.TrimSpace(msg.Error.Message) != "" {
+			return strings.TrimSpace(msg.Error.Message)
+		}
+	case "error":
+		if m := strings.TrimSpace(msg.Message); m != "" {
+			return m
+		}
+	}
+	return sofar
 }
 
 // parseCodexStreamLine extracts text from a codex JSONL line.

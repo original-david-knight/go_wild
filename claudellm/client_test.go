@@ -203,3 +203,42 @@ func TestGenerate_PromptOnStdin(t *testing.T) {
 		}
 	}
 }
+
+// A run that ends on an error result reports the result's text, not only
+// the exit status: "exit status 1" cannot tell an overloaded API or a spent
+// usage limit from a crash.
+func TestGenerate_ErrorResultInError(t *testing.T) {
+	stageFakeClaude(t, `#!/bin/sh
+cat > /dev/null
+echo '{"type":"system"}'
+echo '{"type":"result","subtype":"success","is_error":true,"result":"API Error: 529 Overloaded"}'
+exit 1
+`)
+	c := &Client{Label: "test"}
+	_, err := c.Generate(context.Background(), "prompt", "")
+	if err == nil {
+		t.Fatal("Generate() expected error, got nil")
+	}
+	if !strings.HasPrefix(err.Error(), "test: claude exited with error after ") || !strings.HasSuffix(err.Error(), "(exit status 1): API Error: 529 Overloaded") {
+		t.Fatalf("Generate() error = %q, want the exit status and the result's text", err)
+	}
+}
+
+func TestStreamFailure(t *testing.T) {
+	cases := []struct {
+		name, line, sofar, want string
+	}{
+		{"error result", `{"type":"result","is_error":true,"result":"Claude AI usage limit reached"}`, "", "Claude AI usage limit reached"},
+		{"successful result", `{"type":"result","result":"done"}`, "", ""},
+		{"error result without text", `{"type":"result","is_error":true}`, "earlier", "earlier"},
+		{"other event", `{"type":"assistant"}`, "earlier", "earlier"},
+		{"not json", `garbage`, "earlier", "earlier"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := streamFailure(tc.line, tc.sofar); got != tc.want {
+				t.Fatalf("streamFailure() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

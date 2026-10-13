@@ -122,7 +122,7 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 		}
 	})
 
-	var result string
+	var result, failure string
 	lastEventTime := time.Now()
 	eventCount := 0
 	scanner := bufio.NewScanner(stdout)
@@ -142,6 +142,7 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 		if ok {
 			result = text
 		}
+		failure = streamFailure(line, failure)
 	}
 	scanErr := scanner.Err()
 	if scanErr != nil {
@@ -161,6 +162,9 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 		stderrStr := strings.TrimSpace(stderrBuf.String())
 		if stderrStr != "" {
 			log.Printf("[%s] stderr output: %s", label, stderrStr)
+		}
+		if failure != "" {
+			return "", fmt.Errorf("%s: claude exited with error after %s (%w): %s", label, elapsed, err, failure)
 		}
 		return "", fmt.Errorf("%s: claude exited with error after %s: %w", label, elapsed, err)
 	}
@@ -234,9 +238,27 @@ func parseStreamLine(line string) (string, bool) {
 	return "", false
 }
 
+// streamFailure returns why the run failed as of line, given the reason
+// read so far: the text of a result that is an error, such as an API error
+// or a spent usage limit. An exit status alone does not tell those from a
+// crash, and the caller only sees the error Generate returns.
+func streamFailure(line, sofar string) string {
+	var msg streamMessage
+	if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		return sofar
+	}
+	if msg.Type == "result" && msg.IsError {
+		if r := strings.TrimSpace(msg.Result); r != "" {
+			return r
+		}
+	}
+	return sofar
+}
+
 type streamMessage struct {
 	Type    string         `json:"type"`
 	Result  string         `json:"result,omitempty"`
+	IsError bool           `json:"is_error,omitempty"`
 	Content []contentBlock `json:"content,omitempty"`
 	Delta   deltaBlock     `json:"delta,omitempty"`
 }

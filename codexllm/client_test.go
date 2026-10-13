@@ -987,3 +987,43 @@ func TestGenerate_NoToolsSwitchesEveryToolOff(t *testing.T) {
 		}
 	}
 }
+
+// A run that ends on a failed turn reports the turn's reason, not only the
+// exit status: "exit status 1" cannot tell a model at capacity from a crash.
+func TestGenerate_FailedTurnReasonInError(t *testing.T) {
+	stageFakeCodex(t, `#!/bin/sh
+echo '{"type":"turn.started"}'
+echo '{"type":"error","message":"Selected model is at capacity. Please try a different model."}'
+echo '{"type":"turn.failed","error":{"message":"Selected model is at capacity. Please try a different model."}}'
+exit 1
+`)
+	c := &Client{Label: "test"}
+	_, err := c.Generate(context.Background(), "prompt", "")
+	if err == nil {
+		t.Fatal("Generate() expected error, got nil")
+	}
+	want := "test: codex exited with error after "
+	if !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), "(exit status 1): Selected model is at capacity. Please try a different model.") {
+		t.Fatalf("Generate() error = %q, want the exit status and the turn's reason", err)
+	}
+}
+
+func TestCodexFailure(t *testing.T) {
+	cases := []struct {
+		name, line, sofar, want string
+	}{
+		{"failed turn", `{"type":"turn.failed","error":{"message":"at capacity"}}`, "", "at capacity"},
+		{"error event", `{"type":"error","message":"stream disconnected"}`, "", "stream disconnected"},
+		{"failed turn replaces an earlier error", `{"type":"turn.failed","error":{"message":"at capacity"}}`, "stream disconnected", "at capacity"},
+		{"failed turn without a message keeps the error", `{"type":"turn.failed"}`, "stream disconnected", "stream disconnected"},
+		{"other event", `{"type":"item.completed","item":{"id":"i","type":"agent_message","text":"hi"}}`, "earlier", "earlier"},
+		{"not json", `garbage`, "earlier", "earlier"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexFailure(tc.line, tc.sofar); got != tc.want {
+				t.Fatalf("codexFailure() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
