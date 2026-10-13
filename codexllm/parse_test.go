@@ -1141,4 +1141,3 @@ func TestAppendLogSectionTitleAndBodyCombinations(t *testing.T) {
 		}
 	})
 }
-
