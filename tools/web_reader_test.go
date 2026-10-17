@@ -399,13 +399,12 @@ func TestExtractPDFPageTextRecoversFromPanic(t *testing.T) {
 	})
 }
 
-// TestExtractPDFTextRecoverConvertsLibraryPanicToError specifically exercises
-// the defer-recover branch of extractPDFText by feeding it a PDF whose xref
-// is a FlateDecode stream containing non-flate bytes. The library eagerly
-// decompresses xref streams during NewReader and panics with "zlib: invalid
-// header" when the stream isn't valid flate. Without the recover, that panic
-// would propagate out of extractPDFText and crash the calling goroutine.
-func TestExtractPDFTextRecoverConvertsLibraryPanicToError(t *testing.T) {
+// TestExtractPDFTextReturnsAnErrorForABadXRefStream feeds a PDF whose xref is
+// a FlateDecode stream of non-flate bytes. Older ledongthuc/pdf versions
+// panicked here, inside NewReader, and the recover turned it into an error;
+// since v0.0.0-20260907135840 the library returns "zlib: invalid header"
+// itself. Either way the caller gets an error and no text, never a crash.
+func TestExtractPDFTextReturnsAnErrorForABadXRefStream(t *testing.T) {
 	data := buildXRefStreamPDFWithBadFlate()
 
 	text, err := extractPDFText(data)
@@ -415,10 +414,8 @@ func TestExtractPDFTextRecoverConvertsLibraryPanicToError(t *testing.T) {
 	if text != "" {
 		t.Errorf("expected empty text on error, got %q", text)
 	}
-	// Confirm the error came through the recover path rather than a normal
-	// library return — that path wraps with "failed to parse PDF".
-	if !strings.Contains(err.Error(), "failed to parse PDF") {
-		t.Errorf("expected recover-wrapped error containing %q, got %q", "failed to parse PDF", err.Error())
+	if !strings.Contains(err.Error(), "zlib: invalid header") {
+		t.Errorf("expected the flate failure in the error, got %q", err.Error())
 	}
 }
 

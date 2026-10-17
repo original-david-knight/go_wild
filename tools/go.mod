@@ -5,7 +5,7 @@ go 1.25
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
 	github.com/PuerkitoBio/goquery v1.11.0
-	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
+	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0
 	github.com/original-david-knight/go_wild/agent_auth v0.0.0
 	github.com/original-david-knight/go_wild/agent_data v0.0.0
 	github.com/original-david-knight/go_wild/agentic_loop v0.0.0
