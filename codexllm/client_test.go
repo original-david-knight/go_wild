@@ -1027,3 +1027,41 @@ func TestCodexFailure(t *testing.T) {
 		})
 	}
 }
+
+// ConfigOverrides reach codex as -c settings, and NoTools drops them so an
+// override cannot switch a tool back on.
+func TestGenerate_ConfigOverrides(t *testing.T) {
+	overridesOf := func(c *Client) map[string]bool {
+		t.Helper()
+		argsFile := filepath.Join(t.TempDir(), "args.txt")
+		stageFakeCodexCaptureArgs(t, argsFile)
+		if _, err := c.Generate(context.Background(), "p", ""); err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		raw, err := os.ReadFile(argsFile)
+		if err != nil {
+			t.Fatalf("read args file: %v", err)
+		}
+		args := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+		got := map[string]bool{}
+		for i, a := range args {
+			if a == "-c" && i+1 < len(args) {
+				got[args[i+1]] = true
+			}
+		}
+		return got
+	}
+	set := []string{"features.browser_use=false", "mcp_servers.bromatron.enabled=false"}
+
+	got := overridesOf(&Client{Label: "test", ConfigOverrides: set})
+	for _, want := range set {
+		if !got[want] {
+			t.Fatalf("override %q not passed (got %v)", want, got)
+		}
+	}
+
+	got = overridesOf(&Client{Label: "test", NoTools: true, ConfigOverrides: []string{"features.shell_tool=true"}})
+	if got["features.shell_tool=true"] || !got["features.shell_tool=false"] {
+		t.Fatalf("NoTools let an override through (got %v)", got)
+	}
+}

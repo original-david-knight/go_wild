@@ -65,10 +65,14 @@ type Client struct {
 	// text, this is the boundary: the worst a hostile prompt can do is
 	// answer wrongly. WebSearch is ignored when it is set.
 	NoTools bool
-	Timeout time.Duration // per-call timeout (0 = no limit, uses parent context only)
-	Label   string        // optional label for log lines (e.g. "planner", "synthesizer")
-	Dir     string        // optional working directory for the codex process ("" = inherit)
-	Env     []string      // optional extra KEY=VALUE pairs appended to the inherited environment
+	// ConfigOverrides are extra `-c key=value` settings for this run.
+	// NoTools drops them, so an override cannot hand a tool back to a run
+	// that has none.
+	ConfigOverrides []string
+	Timeout         time.Duration // per-call timeout (0 = no limit, uses parent context only)
+	Label           string        // optional label for log lines (e.g. "planner", "synthesizer")
+	Dir             string        // optional working directory for the codex process ("" = inherit)
+	Env             []string      // optional extra KEY=VALUE pairs appended to the inherited environment
 }
 
 // NoToolsOverrides are the config keys that switch off every tool-bearing
@@ -156,8 +160,13 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 		for _, o := range NoToolsOverrides {
 			args = append(args, "-c", o)
 		}
-	} else if c.WebSearch {
-		args = append(args, "-c", "tools.web_search=true")
+	} else {
+		if c.WebSearch {
+			args = append(args, "-c", "tools.web_search=true")
+		}
+		for _, o := range c.ConfigOverrides {
+			args = append(args, "-c", o)
+		}
 	}
 	if c.Profile != "" {
 		args = append(args, "-p", c.Profile)
