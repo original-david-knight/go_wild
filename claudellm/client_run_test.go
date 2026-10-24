@@ -9,9 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // captureLog routes the standard logger into a buffer for the test.
@@ -361,4 +364,66 @@ func TestWriteResearchOutputStyleFailsWithoutATempDir(t *testing.T) {
 	if err == nil || path != "" || cleanup != nil {
 		t.Errorf("WriteResearchOutputStyle = %q, %v, %v; want an error", path, cleanup != nil, err)
 	}
+}
+
+// A tool the agent started (a build run through its shell) dies with it: a
+// cancelled run must not leave the work it started running.
+func TestGenerateCancelKillsWhatTheCLIStarted(t *testing.T) {
+	captureLog(t)
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+	t.Setenv("CHILD_PID_FILE", pidFile)
+	stageFakeClaude(t, `#!/bin/sh
+sh -c 'echo $$ > "$CHILD_PID_FILE.tmp"; mv "$CHILD_PID_FILE.tmp" "$CHILD_PID_FILE"; exec sleep 60' > /dev/null 2>&1 &
+echo '{"type":"system"}'
+exec sleep 60
+`)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := (&Client{Label: "grp"}).Generate(ctx, "p", "")
+		done <- err
+	}()
+	pid := waitForPID(t, pidFile)
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if !processGone(pid, 5*time.Second) {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		t.Fatalf("the CLI's child %d outlived the cancelled run", pid)
+	}
+}
+
+func waitForPID(t *testing.T, path string) int {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if raw, err := os.ReadFile(path); err == nil {
+			pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+			if err != nil {
+				t.Fatalf("pid file %q: %v", raw, err)
+			}
+			return pid
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("the fake CLI never started its child")
+	return 0
+}
+
+// processGone reports whether pid stopped existing within d. A killed child
+// reparented to init may linger briefly as a zombie until it is reaped.
+func processGone(pid int, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+			return true
+		}
+		if stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat"); err == nil && strings.Contains(string(stat), ") Z ") {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
 }

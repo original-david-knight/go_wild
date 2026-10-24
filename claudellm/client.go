@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -89,6 +90,10 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 	started := time.Now()
 
 	cmd := exec.CommandContext(ctx, bin, args...)
+	// The CLI's tools run in its process group, so a cancel or a timeout
+	// stops a build the agent started through its shell, not only the CLI.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.Stdin = strings.NewReader(prompt)
 	if c.Dir != "" {
 		cmd.Dir = c.Dir

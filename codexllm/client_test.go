@@ -3,13 +3,16 @@ package codexllm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -1063,5 +1066,47 @@ func TestGenerate_ConfigOverrides(t *testing.T) {
 	got = overridesOf(&Client{Label: "test", NoTools: true, ConfigOverrides: []string{"features.shell_tool=true"}})
 	if got["features.shell_tool=true"] || !got["features.shell_tool=false"] {
 		t.Fatalf("NoTools let an override through (got %v)", got)
+	}
+}
+
+// A tool the agent started (a build run through its shell) dies with it: a
+// cancelled run must not leave the work it started running.
+func TestGenerateCancelKillsWhatTheCLIStarted(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+	t.Setenv("CHILD_PID_FILE", pidFile)
+	stageFakeCodex(t, `#!/bin/sh
+sh -c 'echo $$ > "$CHILD_PID_FILE.tmp"; mv "$CHILD_PID_FILE.tmp" "$CHILD_PID_FILE"; exec sleep 60' > /dev/null 2>&1 &
+echo '{"type":"thread.started"}'
+exec sleep 60
+`)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := (&Client{Label: "grp"}).Generate(ctx, "p", "")
+		done <- err
+	}()
+	var pid int
+	for deadline := time.Now().Add(10 * time.Second); pid == 0 && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if raw, err := os.ReadFile(pidFile); err == nil {
+			pid, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
+		}
+	}
+	if pid == 0 {
+		t.Fatal("the fake CLI never started its child")
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		stat, _ := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+		if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) || strings.Contains(string(stat), ") Z ") {
+			return
+		}
+		if time.Now().After(deadline) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("the CLI's child %d outlived the cancelled run", pid)
+		}
 	}
 }
