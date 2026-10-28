@@ -111,7 +111,53 @@ func testAtomicWrites(t *testing.T, db Database) {
 			t.Fatalf("%d update winners, want one", won.Load())
 		}
 	})
+	t.Run("concurrent upserts of an absent id", func(t *testing.T) {
+		concurrentAtomic(t, func(i int) error {
+			wrote, err := atomicDAO.Upsert(ctx, &atomicTestRow{ID: "upserted", Revision: i, Name: fmt.Sprint(i)})
+			if err == nil && !wrote {
+				err = fmt.Errorf("writer %d wrote nothing", i)
+			}
+			return err
+		})
+		rows, err := dao.Query(ctx, QueryOpts{Where: map[string]any{"id": "upserted"}})
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("rows = %+v, %v, want one", rows, err)
+		}
+		if held := rows[0].(*atomicTestRow); held.Name != fmt.Sprint(held.Revision) {
+			t.Fatalf("row mixes two writers: %+v", held)
+		}
+	})
+	t.Run("upsert overwrites an existing row", func(t *testing.T) {
+		at := time.Date(2026, 10, 27, 9, 30, 0, 0, time.UTC)
+		want := atomicTestRow{ID: "upserted", UserID: "carol", Revision: 9, Name: "overwritten", Enabled: true, At: at}
+		if wrote, err := atomicDAO.Upsert(ctx, want); err != nil || !wrote {
+			t.Fatalf("upsert = %v, %v", wrote, err)
+		}
+		var held atomicTestRow
+		if err := dao.Get(ctx, want.ID, &held); err != nil || held.At.UTC() != want.At || held.Name != want.Name ||
+			held.UserID != want.UserID || held.Revision != want.Revision || !held.Enabled {
+			t.Fatalf("row = %+v, %v, want %+v", held, err, want)
+		}
+	})
+	t.Run("user-scoped upsert leaves another user's row alone", func(t *testing.T) {
+		alice := db.ForUser("alice").Table(atomicTestRow{}).(AtomicTableDAO)
+		bob := db.ForUser("bob").Table(atomicTestRow{}).(AtomicTableDAO)
+		if wrote, err := alice.Upsert(ctx, &atomicTestRow{ID: "owned", Name: "alice's"}); err != nil || !wrote {
+			t.Fatalf("owner insert = %v, %v", wrote, err)
+		}
+		if wrote, err := bob.Upsert(ctx, &atomicTestRow{ID: "owned", UserID: "alice", Name: "bob's"}); err != nil || wrote {
+			t.Fatalf("foreign upsert = %v, %v, want false and no error", wrote, err)
+		}
+		if wrote, err := alice.Upsert(ctx, atomicTestRow{ID: "owned", UserID: "bob", Name: "alice's again"}); err != nil || !wrote {
+			t.Fatalf("owner update = %v, %v", wrote, err)
+		}
+		var held atomicTestRow
+		if err := dao.Get(ctx, "owned", &held); err != nil || held.UserID != "alice" || held.Name != "alice's again" {
+			t.Fatalf("row = %+v, %v, want alice's own update", held, err)
+		}
+	})
 	t.Run("rollback and user scope", func(t *testing.T) {
+
 		errRollback := errors.New("rollback")
 		err := db.RunInTransaction(ctx, func(tx Database) error {
 			table := tx.ForUser("alice").Table(atomicTestRow{})

@@ -3,6 +3,7 @@ package dbx
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,9 +14,10 @@ import (
 // thing is the kit's own model — the tests exercise the generics against a
 // real sqlite-backed database, which is what every consumer runs on.
 type thing struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Kind string `json:"kind"`
+	ID   string   `json:"id"`
+	Name string   `json:"name"`
+	Kind string   `json:"kind"`
+	Tags []string `json:"tags"`
 }
 
 func (thing) TableName() string { return "dbx_test_things" }
@@ -229,5 +231,64 @@ func TestAtomicHelpersRefuseUnsupportedTables(t *testing.T) {
 	}
 	if _, err := DeleteIf[thing](ctx, nil, "one", nil); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("unavailable delete = %v", err)
+	}
+}
+
+func TestConcurrentUpsertsOfAnAbsentIDAllSucceed(t *testing.T) {
+	db := memDB(t)
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	gate := make(chan struct{})
+	errs := make(chan error, 8)
+	for i := range 8 {
+		wg.Go(func() {
+			<-gate
+			name := fmt.Sprint(i)
+			errs <- Upsert(ctx, db, "one", &thing{ID: "one", Name: name, Tags: []string{name}})
+		})
+	}
+	close(gate)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := All[thing](ctx, db, gowild_data.QueryOpts{})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %+v, %v, want one", rows, err)
+	}
+	if row := rows[0]; len(row.Tags) != 1 || row.Tags[0] != row.Name {
+		t.Fatalf("row mixes two writers: %+v", row)
+	}
+	if err := Upsert(ctx, db, "one", &thing{ID: "one", Name: "last", Kind: "k", Tags: []string{"a", "b"}}); err != nil {
+		t.Fatal(err)
+	}
+	if row, err := Get[thing](ctx, db, "one"); err != nil || row.Name != "last" || row.Kind != "k" || fmt.Sprint(row.Tags) != "[a b]" {
+		t.Fatalf("row = %+v, %v, want the last write's columns", row, err)
+	}
+}
+
+func TestUpsertAndReplaceSetRefuseUnsupportedTables(t *testing.T) {
+	db := memDB(t)
+	ctx := context.Background()
+	if err := Upsert(ctx, db, "kept", &thing{ID: "kept", Kind: "k"}); err != nil {
+		t.Fatal(err)
+	}
+	wrapped := nonAtomicDB{db}
+	if err := Upsert(ctx, wrapped, "one", &thing{ID: "one"}); !errors.Is(err, ErrAtomicUnsupported) {
+		t.Fatalf("upsert = %v", err)
+	}
+	err := ReplaceSet(ctx, wrapped, gowild_data.QueryOpts{Where: map[string]any{"kind": "k"}}, []*thing{{ID: "one", Kind: "k"}},
+		func(row *thing) string { return row.ID })
+	if !errors.Is(err, ErrAtomicUnsupported) {
+		t.Fatalf("replace set = %v", err)
+	}
+	if rows, err := All[thing](ctx, db, gowild_data.QueryOpts{}); err != nil || len(rows) != 1 || rows[0].ID != "kept" {
+		t.Fatalf("unsupported adapter changed data: %+v, %v", rows, err)
+	}
+	if err := Upsert(ctx, nil, "one", &thing{ID: "one"}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("unavailable upsert = %v", err)
 	}
 }

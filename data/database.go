@@ -70,6 +70,11 @@ type AtomicTableDAO interface {
 	// DeleteIf deletes id only while the expected columns still match, with
 	// the same comparison semantics as UpdateIf.
 	DeleteIf(ctx context.Context, id string, expected map[string]any) (bool, error)
+	// Upsert inserts model, or overwrites every column of the row holding its
+	// primary key. It writes the same columns Insert does. A user-scoped table
+	// overwrites only its own user's row: a key held by another user reports
+	// false and leaves that row alone.
+	Upsert(ctx context.Context, model any) (bool, error)
 }
 
 // QueryOpts specifies query options.

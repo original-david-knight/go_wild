@@ -1,5 +1,5 @@
 // Package dbx is a small typed kit over the data module's Database and
-// TableDAO: the query-then-assert loop, the query-by-id upsert, the
+// TableDAO: the query-then-assert loop, the one-statement upsert, the
 // delete-absent/upsert-present reconcile, and the two facts every consumer
 // would otherwise declare for itself — the DBFunc handle seam and the one
 // "database unavailable" error, so an unavailable database is reported one
@@ -9,6 +9,7 @@ package dbx
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	gowild_data "github.com/original-david-knight/go_wild/data"
 )
@@ -67,23 +68,23 @@ func Get[T any](ctx context.Context, db gowild_data.Database, id string) (*T, er
 	return rows[0], nil
 }
 
-// Upsert writes row under id: an existing row is updated in place, a fresh
-// one inserted — the query-by-id then Update-or-Insert body in one place.
+// Upsert writes row under id in one statement: an existing row is updated in
+// place, a fresh one inserted, so concurrent writers of an absent id never
+// collide on its primary key. id must be row's primary key; it remains in the
+// signature for existing callers.
 func Upsert[T any](ctx context.Context, db gowild_data.Database, id string, row *T) error {
-	dao := Table[T](db)
-	if dao == nil {
-		return ErrUnavailable
-	}
-	existing, err := dao.Query(ctx, gowild_data.QueryOpts{
-		Where: map[string]any{"id": id}, Limit: 1,
-	})
+	dao, err := atomicTable[T](db)
 	if err != nil {
 		return err
 	}
-	if len(existing) > 0 {
-		return dao.Update(ctx, row)
+	wrote, err := dao.Upsert(ctx, row)
+	if err != nil {
+		return err
 	}
-	return dao.Insert(ctx, row)
+	if !wrote {
+		return fmt.Errorf("upsert %s: the row belongs to another user", id)
+	}
+	return nil
 }
 
 // InsertNew atomically inserts row only when its primary key is absent. id
@@ -134,6 +135,10 @@ func ReplaceSet[T any](ctx context.Context, db gowild_data.Database, filter gowi
 	dao := Table[T](db)
 	if dao == nil {
 		return ErrUnavailable
+	}
+	// Refuse before deleting, so an unsupported table is left untouched.
+	if _, ok := dao.(gowild_data.AtomicTableDAO); !ok {
+		return ErrAtomicUnsupported
 	}
 	existing, err := All[T](ctx, db, filter)
 	if err != nil {

@@ -57,6 +57,30 @@ func (d *sqlTableDAO) DeleteIf(ctx context.Context, id string, expected map[stri
 	return wroteRow(d.exec.ExecContext(ctx, query, args...))
 }
 
+func (d *sqlTableDAO) Upsert(ctx context.Context, model any) (bool, error) {
+	return d.upsert(ctx, model, "")
+}
+
+// upsert overwrites a conflicting row only while guard holds, so a guarded
+// conflict writes nothing instead of failing on the primary key.
+func (d *sqlTableDAO) upsert(ctx context.Context, model any, guard string) (bool, error) {
+	columns, values := d.prepareInsert(model)
+	placeholders := make([]string, len(columns))
+	var sets []string
+	for i, col := range columns {
+		placeholders[i] = d.dialect.Placeholder(i + 1)
+		if !d.meta.Fields[i].IsID {
+			sets = append(sets, col+" = EXCLUDED."+col)
+		}
+	}
+	if len(sets) == 0 {
+		sets = append(sets, d.getIDColumn()+" = EXCLUDED."+d.getIDColumn())
+	}
+	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) ON CONFLICT (%s) DO UPDATE SET %s%s",
+		d.meta.TableName, strings.Join(columns, ", "), strings.Join(placeholders, ", "), d.getIDColumn(), strings.Join(sets, ", "), guard)
+	return wroteRow(d.exec.ExecContext(ctx, query, values...))
+}
+
 // expectedConditions validates names against the model and encodes values
 // with the write codec. In particular, SQLite stores timestamps as text and
 // booleans as integers, so raw driver arguments would not compare correctly.
@@ -120,6 +144,14 @@ func (d *sqlUserTableDAO) UpdateIf(ctx context.Context, model any, expected map[
 
 func (d *sqlUserTableDAO) DeleteIf(ctx context.Context, id string, expected map[string]any) (bool, error) {
 	return d.base.DeleteIf(ctx, id, d.scopedExpected(expected))
+}
+
+func (d *sqlUserTableDAO) Upsert(ctx context.Context, model any) (bool, error) {
+	scoped, err := d.scopedModel(model)
+	if err != nil {
+		return false, err
+	}
+	return d.base.upsert(ctx, scoped, " WHERE "+d.base.meta.TableName+".user_id = EXCLUDED.user_id")
 }
 
 func (d *sqlUserTableDAO) scopedExpected(expected map[string]any) map[string]any {
