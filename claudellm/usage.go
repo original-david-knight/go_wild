@@ -132,6 +132,9 @@ func (r UsageReader) token() (string, error) {
 // ParseUsage reads the endpoint's JSON. The five-hour and weekly windows
 // come from five_hour and seven_day; the scoped weekly windows from the
 // limits list, where kind weekly_scoped carries the model's display name.
+// The weekly window is required. An account with no five-hour limit in
+// force gets five_hour null (seen from 2026-10-31), which is a Session
+// window with a zero ResetsAt, not a failed reading.
 func ParseUsage(body []byte) (*Usage, error) {
 	var raw struct {
 		FiveHour *rawWindow `json:"five_hour"`
@@ -146,10 +149,13 @@ func ParseUsage(body []byte) (*Usage, error) {
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("claude usage: %w", err)
 	}
-	if raw.FiveHour == nil || raw.SevenDay == nil {
-		return nil, errors.New("claude usage: the response carries no five_hour or seven_day window")
+	if raw.SevenDay == nil {
+		return nil, errors.New("claude usage: the response carries no seven_day window")
 	}
-	u := &Usage{Session: raw.FiveHour.window(), Weekly: raw.SevenDay.window()}
+	u := &Usage{Weekly: raw.SevenDay.window()}
+	if raw.FiveHour != nil {
+		u.Session = raw.FiveHour.window()
+	}
 	for _, l := range raw.Limits {
 		if l.Kind != "weekly_scoped" || l.Scope == nil || l.Scope.Model == nil {
 			continue

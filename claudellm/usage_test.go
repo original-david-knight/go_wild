@@ -44,6 +44,17 @@ func TestParseUsage(t *testing.T) {
 	if len(u.Scoped) != 1 || u.Scoped[0].Model != "Fable" || u.Scoped[0].Used != 92 || u.Scoped[0].ResetsAt.IsZero() {
 		t.Fatalf("scoped: %+v", u.Scoped)
 	}
+	// The response of 2026-10-31 on, trimmed: no five-hour limit in force.
+	u, err = ParseUsage([]byte(`{"five_hour": null, "seven_day": {"utilization": 58.0, "resets_at": "2026-11-09T08:00:00.327979+00:00"}, "limits": [{"kind": "weekly_all", "percent": 58, "resets_at": "2026-11-09T08:00:00.327979+00:00", "scope": null}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Session != (UsageWindow{}) || u.Weekly.Used != 58 || u.Weekly.ResetsAt.IsZero() {
+		t.Fatalf("no five-hour window: %+v", u)
+	}
+	if _, err := ParseUsage([]byte(`{"five_hour": {"utilization": 5.0}, "limits": []}`)); err == nil {
+		t.Fatal("a response without the weekly window parsed")
+	}
 	if _, err := ParseUsage([]byte(`{"limits": []}`)); err == nil {
 		t.Fatal("a response without the windows parsed")
 	}
