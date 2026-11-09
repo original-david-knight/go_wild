@@ -22,6 +22,10 @@ func (c *recordingAnalyzerClient) GenerateContent(_ context.Context, _ []*genai.
 	return c.response, nil
 }
 
+func (c *recordingAnalyzerClient) GenerateContentStreaming(ctx context.Context, contents []*genai.Content, cfg *loop.GenerateContentConfig, sink func(string)) (*loop.GenerateResponse, error) {
+	return loop.SingleDeltaFallback(ctx, c, contents, cfg, sink)
+}
+
 func (c *recordingAnalyzerClient) SetModel(model string) { c.model = model }
 func (c *recordingAnalyzerClient) GetModel() string      { return c.model }
 func (c *recordingAnalyzerClient) Close() error          { return nil }
