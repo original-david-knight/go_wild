@@ -29,6 +29,9 @@ type Client struct {
 	Label           string        // optional label for log lines (e.g. "planner", "synthesizer")
 	Dir             string        // optional working directory for the claude process ("" = inherit)
 	Env             []string      // optional extra KEY=VALUE pairs appended to the inherited environment
+	// PrepareCommand can place the CLI in a caller-owned process scope before
+	// it starts. It must leave the configured cancellation behavior intact.
+	PrepareCommand func(context.Context, *exec.Cmd) error
 }
 
 // Generate runs `claude -p` with the given prompt and optional system prompt,
@@ -100,6 +103,11 @@ func (c *Client) Generate(ctx context.Context, prompt, systemPrompt string) (str
 	}
 	if len(c.Env) > 0 {
 		cmd.Env = append(os.Environ(), c.Env...)
+	}
+	if c.PrepareCommand != nil {
+		if err := c.PrepareCommand(ctx, cmd); err != nil {
+			return "", fmt.Errorf("%s: prepare claude command: %w", label, err)
+		}
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

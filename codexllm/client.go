@@ -74,6 +74,9 @@ type Client struct {
 	Label           string        // optional label for log lines (e.g. "planner", "synthesizer")
 	Dir             string        // optional working directory for the codex process ("" = inherit)
 	Env             []string      // optional extra KEY=VALUE pairs appended to the inherited environment
+	// PrepareCommand can place the CLI in a caller-owned process scope before
+	// it starts. It must leave the configured cancellation behavior intact.
+	PrepareCommand func(context.Context, *exec.Cmd) error
 }
 
 // NoToolsOverrides are the config keys that switch off every tool-bearing
@@ -197,6 +200,11 @@ func (c *Client) GenerateWithObserved(ctx context.Context, prompt, systemPrompt 
 	}
 	if len(c.Env) > 0 {
 		cmd.Env = append(os.Environ(), c.Env...)
+	}
+	if c.PrepareCommand != nil {
+		if err := c.PrepareCommand(ctx, cmd); err != nil {
+			return "", nil, fmt.Errorf("%s: prepare codex command: %w", label, err)
+		}
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -61,6 +62,26 @@ echo '{"type":"item.completed","item":{"id":"i1","type":"agent_message","text":"
 echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
 `)
 	t.Setenv("ARGS_CAPTURE_FILE", argsFile)
+}
+
+func TestGeneratePrepareCommandCanRefuseLaunch(t *testing.T) {
+	launched := filepath.Join(t.TempDir(), "launched")
+	stageFakeCodex(t, "#!/bin/sh\ntouch \"$LAUNCHED_FILE\"\n")
+	t.Setenv("LAUNCHED_FILE", launched)
+	refused := errors.New("no process scope")
+	c := &Client{PrepareCommand: func(_ context.Context, cmd *exec.Cmd) error {
+		if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid || cmd.Cancel == nil {
+			t.Fatal("command was prepared before cancellation was configured")
+		}
+		return refused
+	}}
+	_, err := c.Generate(context.Background(), "prompt", "")
+	if !errors.Is(err, refused) {
+		t.Fatalf("Generate() error = %v, want process scope refusal", err)
+	}
+	if _, err := os.Stat(launched); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("CLI launched after scope refusal: %v", err)
+	}
 }
 
 // findFlagValue returns the value following flag in args, or "" if absent.
