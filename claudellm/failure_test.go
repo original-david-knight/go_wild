@@ -16,6 +16,8 @@ func TestClassify(t *testing.T) {
 		{`API Error: 429 {"type":"error","error":{"type":"rate_limit_error"}}`, ErrBusy},
 		{"Claude AI usage limit reached|1760000000", ErrUsageLimit},
 		{"You've hit your limit · resets 3pm (America/Los_Angeles)", ErrUsageLimit},
+		{"You've hit your weekly limit · resets Nov 13, 2am (America/Los_Angeles)", ErrUsageLimit},
+		{"You've hit your 5-hour limit", ErrUsageLimit},
 		{"Execution error", nil},
 		{"", nil},
 	}

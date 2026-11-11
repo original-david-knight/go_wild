@@ -2,6 +2,7 @@ package claudellm
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 )
 
@@ -36,6 +37,11 @@ func (e *RunError) Unwrap() []error {
 	return errs
 }
 
+// hitYourLimit matches the provider naming a spent window: "hit your
+// limit", and with the window named, "hit your weekly limit", "hit your
+// 5-hour limit".
+var hitYourLimit = regexp.MustCompile(`hit your (?:[\w-]+ ){0,3}limit`)
+
 // classify reads a failure message: ErrUsageLimit, ErrBusy, or nil when it
 // names neither. The usage limit is tested first, since its wording can
 // mention a rate.
@@ -44,7 +50,7 @@ func classify(reason string) error {
 	switch {
 	case r == "":
 		return nil
-	case strings.Contains(r, "usage limit"), strings.Contains(r, "hit your limit"), strings.Contains(r, "quota"):
+	case strings.Contains(r, "usage limit"), hitYourLimit.MatchString(r), strings.Contains(r, "quota"):
 		return ErrUsageLimit
 	case strings.Contains(r, "at capacity"), strings.Contains(r, "overloaded"), strings.Contains(r, "high demand"),
 		strings.Contains(r, "rate limit"), strings.Contains(r, "too many requests"), strings.Contains(r, "429"),

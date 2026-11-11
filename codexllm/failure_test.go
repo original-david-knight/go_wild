@@ -15,6 +15,8 @@ func TestClassify(t *testing.T) {
 		{"We're currently experiencing high demand, which may cause temporary errors.", ErrBusy},
 		{"exceeded retry limit, last status: 429 Too Many Requests", ErrBusy},
 		{"You've hit your usage limit. Upgrade to Pro or try again at 3:05 PM.", ErrUsageLimit},
+		{"You've hit your weekly limit. Try again on Nov 13.", ErrUsageLimit},
+		{"You've hit your 5-hour limit", ErrUsageLimit},
 		{"apply_patch verification failed", nil},
 		{"", nil},
 	}
