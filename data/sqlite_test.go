@@ -408,3 +408,46 @@ func TestSqliteDatabase_InMemoryVisibleAcrossGoroutines(t *testing.T) {
 		t.Fatalf("expected %d rows after concurrent inserts, got %d", workers, len(rows))
 	}
 }
+
+// assertQueryOmits checks that a query omitting columns returns those fields
+// as zero values, keeps the rest, and leaves the stored row whole.
+func assertQueryOmits(t *testing.T, dao TableDAO) {
+	t.Helper()
+	ctx := context.Background()
+	if err := dao.Insert(ctx, &TestUser{ID: "1", Name: "Alice", Email: "a@example.com", Age: 30, Tags: []string{"admin"}}); err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	results, err := dao.Query(ctx, QueryOpts{Omit: []string{"tags", "email"}})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	got := results[0].(*TestUser)
+	if got.Tags != nil || got.Email != "" {
+		t.Errorf("omitted columns were read: tags %v, email %q", got.Tags, got.Email)
+	}
+	if got.ID != "1" || got.Name != "Alice" || got.Age != 30 {
+		t.Errorf("kept columns lost: %+v", got)
+	}
+	var full TestUser
+	if err := dao.Get(ctx, "1", &full); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(full.Tags) != 1 || full.Email != "a@example.com" {
+		t.Errorf("stored row changed: %+v", full)
+	}
+}
+
+func TestSqliteDatabase_QueryOmit(t *testing.T) {
+	db, err := NewSqliteDatabase(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	defer db.Close()
+	if err := db.AddTable(TestUser{}); err != nil {
+		t.Fatalf("AddTable: %v", err)
+	}
+	assertQueryOmits(t, db.Table(TestUser{}))
+}

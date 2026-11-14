@@ -96,4 +96,9 @@ type QueryOpts struct {
 
 	// Offset skips the first N results.
 	Offset int
+
+	// Omit names columns, by database name, to leave unread: each comes back
+	// as its field's zero value. A row read this way is partial, so writing
+	// it back would clear those columns.
+	Omit []string
 }

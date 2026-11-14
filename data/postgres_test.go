@@ -401,3 +401,14 @@ func TestCreateTableSQLPostgres(t *testing.T) {
 		t.Errorf("unexpected SQL:\ngot:\n%s\nexpected:\n%s", sql, expected)
 	}
 }
+
+func TestPostgresDatabase_QueryOmit(t *testing.T) {
+	db := skipIfNoPostgres(t)
+	defer db.Close()
+	cleanupTable(db, "test_users")
+	defer cleanupTable(db, "test_users")
+	if err := db.AddTable(TestUser{}); err != nil {
+		t.Fatalf("AddTable: %v", err)
+	}
+	assertQueryOmits(t, db.Table(TestUser{}))
+}

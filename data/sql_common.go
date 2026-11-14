@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -106,6 +107,11 @@ func (d *sqlTableDAO) GetAll(ctx context.Context) ([]any, error) {
 
 func (d *sqlTableDAO) Query(ctx context.Context, opts QueryOpts) ([]any, error) {
 	columns := d.getColumns()
+	for i, col := range columns {
+		if slices.Contains(opts.Omit, col) {
+			columns[i] = "NULL AS " + col
+		}
+	}
 	query := fmt.Sprintf("SELECT %s FROM %s", strings.Join(columns, ", "), d.meta.TableName)
 
 	var args []any
