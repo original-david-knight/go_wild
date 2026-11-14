@@ -18,6 +18,7 @@ func TestClassify(t *testing.T) {
 		{"You've hit your limit · resets 3pm (America/Los_Angeles)", ErrUsageLimit},
 		{"You've hit your weekly limit · resets Nov 13, 2am (America/Los_Angeles)", ErrUsageLimit},
 		{"You've hit your 5-hour limit", ErrUsageLimit},
+		{"You've reached your Fable limit. Switch to another model, or manage usage credits at https://claude.ai/settings/usage?from=cc_cli_limit_message, to continue.", ErrUsageLimit},
 		{"Execution error", nil},
 		{"", nil},
 	}

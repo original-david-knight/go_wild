@@ -38,9 +38,9 @@ func (e *RunError) Unwrap() []error {
 }
 
 // hitYourLimit matches the provider naming a spent window: "hit your
-// limit", and with the window named, "hit your weekly limit", "hit your
-// 5-hour limit".
-var hitYourLimit = regexp.MustCompile(`hit your (?:[\w-]+ ){0,3}limit`)
+// limit", and with the window or model named, "hit your weekly limit",
+// "hit your 5-hour limit", "reached your Fable limit".
+var hitYourLimit = regexp.MustCompile(`(?:hit|reached) your (?:[\w-]+ ){0,3}limit`)
 
 // classify reads a failure message: ErrUsageLimit, ErrBusy, or nil when it
 // names neither. The usage limit is tested first, since its wording can
